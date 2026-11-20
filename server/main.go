@@ -14,7 +14,10 @@ import (
 	"embed"
 	"encoding/hex"
 	"encoding/json"
+	"encoding/xml"
+	"fmt"
 	"html/template"
+	"io"
 	"io/fs"
 	"log"
 	"net/http"
@@ -90,6 +93,8 @@ func newMux() *http.ServeMux {
 	mux.HandleFunc("GET /api/v1/finance/rider", handleRiderPayout)
 	mux.HandleFunc("GET /api/v1/finance/checkout-fee", handleCheckoutFee)
 	mux.HandleFunc("GET /api/v1/finance/simulate-month", handleSimulateMonth)
+	mux.HandleFunc("GET /sitemap.xml", handleSitemap)
+	mux.HandleFunc("GET /robots.txt", handleRobots)
 	mux.HandleFunc("POST /cart/add", handleCartAdd)
 	// Catch-all: anything unmatched gets the branded 404. Go's mux routes the
 	// most specific pattern first, so this never shadows the routes above.
@@ -422,6 +427,70 @@ func handleCartAdd(w http.ResponseWriter, r *http.Request) {
 	}
 	// No-JS fallback: back to the shop, badge refreshed on the next render.
 	http.Redirect(w, r, "/shop", http.StatusSeeOther)
+}
+
+// urlset/urlEntry are the sitemap protocol structures.
+type urlEntry struct {
+	Loc string `xml:"loc"`
+}
+
+type urlset struct {
+	XMLName xml.Name   `xml:"urlset"`
+	Ns      string     `xml:"xmlns,attr"`
+	URLs    []urlEntry `xml:"url"`
+}
+
+// sitemapPaths lists every indexable path: static pages, the shop, and every
+// filter combination that actually has products — so engines never crawl
+// empty filter pages.
+func sitemapPaths() []string {
+	paths := []string{"/", "/privacy", "/terms", "/shop"}
+	for _, c := range catalog.Categories() {
+		catPath := "/shop/" + c
+		paths = append(paths, catPath)
+		for _, b := range catalog.Brands() {
+			if len(catalog.Filter(c, b, "")) == 0 {
+				continue
+			}
+			brandPath := catPath + "/" + b
+			paths = append(paths, brandPath)
+			for _, s := range catalog.Sizes() {
+				if len(catalog.Filter(c, b, s)) > 0 {
+					paths = append(paths, brandPath+"/"+s)
+				}
+			}
+		}
+	}
+	return paths
+}
+
+// handleSitemap generates /sitemap.xml from the catalog so every product
+// filter page is discoverable; the Turso-backed provider feeds the same
+// builder once the database phase lands.
+func handleSitemap(w http.ResponseWriter, r *http.Request) {
+	urls := make([]urlEntry, 0, 16)
+	for _, p := range sitemapPaths() {
+		urls = append(urls, urlEntry{Loc: baseURL() + p})
+	}
+	w.Header().Set("Content-Type", "application/xml; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	enc := xml.NewEncoder(w)
+	enc.Indent("", "  ")
+	if _, err := io.WriteString(w, xml.Header); err == nil {
+		if err := enc.Encode(urlset{
+			Ns:   "http://www.sitemaps.org/schemas/sitemap/0.9",
+			URLs: urls,
+		}); err != nil {
+			log.Printf("render sitemap: %v", err)
+		}
+	}
+}
+
+// handleRobots serves /robots.txt, pointing crawlers at the sitemap.
+func handleRobots(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	fmt.Fprintf(w, "User-agent: *\nAllow: /\nDisallow: /static/\n\nSitemap: %s/sitemap.xml\n", baseURL())
 }
 
 func handlePrivacy(w http.ResponseWriter, r *http.Request) {
