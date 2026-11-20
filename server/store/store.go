@@ -92,6 +92,26 @@ CREATE TABLE IF NOT EXISTS cart_items (
 	qty        INTEGER NOT NULL,
 	PRIMARY KEY (session_id, product_id)
 );
+CREATE TABLE IF NOT EXISTS orders (
+	id                TEXT PRIMARY KEY,
+	status            TEXT NOT NULL,
+	shop_id           TEXT NOT NULL,
+	rider_id          TEXT NOT NULL,
+	subtotal_minor    INTEGER NOT NULL,
+	delivery_fee_minor INTEGER NOT NULL,
+	total_minor       INTEGER NOT NULL,
+	rider_payout_minor INTEGER NOT NULL,
+	lat               REAL NOT NULL,
+	lng               REAL NOT NULL,
+	created_at        TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS order_items (
+	order_id        TEXT NOT NULL,
+	product_id      TEXT NOT NULL,
+	qty             INTEGER NOT NULL,
+	unit_price_minor INTEGER NOT NULL,
+	PRIMARY KEY (order_id, product_id)
+);
 `
 
 // EnsureSchema creates the tables if they are missing.
