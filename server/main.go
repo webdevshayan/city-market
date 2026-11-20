@@ -11,6 +11,7 @@ package main
 
 import (
 	"crypto/rand"
+	"crypto/subtle"
 	"embed"
 	"encoding/hex"
 	"encoding/json"
@@ -196,6 +197,14 @@ func newMuxWith(apiLimit, cartLimit func(http.Handler) http.Handler) *http.Serve
 	mux.Handle("POST /api/v1/shop/orders/{id}/confirm", cartLimit(http.HandlerFunc(handleOrderTransition(orders.StatusConfirmed))))
 	mux.Handle("POST /api/v1/rider/orders/{id}/pick-up", cartLimit(http.HandlerFunc(handleOrderTransition(orders.StatusPickedUp))))
 	mux.Handle("POST /api/v1/rider/orders/{id}/deliver", cartLimit(http.HandlerFunc(handleOrderTransition(orders.StatusDelivered))))
+	// Admin console: rate limit OUTSIDE auth so token guessing is throttled.
+	mux.Handle("GET /api/v1/admin/shops", apiLimit(adminAuth(http.HandlerFunc(handleAdminListShops))))
+	mux.Handle("GET /api/v1/admin/riders", apiLimit(adminAuth(http.HandlerFunc(handleAdminListRiders))))
+	mux.Handle("GET /api/v1/admin/products", apiLimit(adminAuth(http.HandlerFunc(handleAdminListProducts))))
+	mux.Handle("GET /api/v1/admin/commission", apiLimit(adminAuth(http.HandlerFunc(handleAdminCommission))))
+	mux.Handle("PUT /api/v1/admin/shops/{id}", cartLimit(adminAuth(http.HandlerFunc(handleAdminUpsertShop))))
+	mux.Handle("PUT /api/v1/admin/riders/{id}", cartLimit(adminAuth(http.HandlerFunc(handleAdminUpsertRider))))
+	mux.Handle("PUT /api/v1/admin/products/{id}", cartLimit(adminAuth(http.HandlerFunc(handleAdminUpsertProduct))))
 	mux.HandleFunc("GET /sitemap.xml", handleSitemap)
 	mux.HandleFunc("GET /robots.txt", handleRobots)
 	mux.Handle("POST /cart/add", cartLimit(http.HandlerFunc(handleCartAdd)))
@@ -809,6 +818,199 @@ func handleOrderTransition(to orders.Status) http.HandlerFunc {
 			writeErr(w, http.StatusInternalServerError, err.Error())
 		}
 	}
+}
+
+// adminAuth guards the admin console API. An unset ADMIN_TOKEN disables the
+// console entirely — default-deny; a wrong token gets 401 via a
+// constant-time compare. Rate limiting wraps this, not the reverse, so
+// token guessing is throttled.
+func adminAuth(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		token := os.Getenv("ADMIN_TOKEN")
+		if token == "" {
+			writeErr(w, http.StatusServiceUnavailable, "admin console disabled — set ADMIN_TOKEN")
+			return
+		}
+		if subtle.ConstantTimeCompare([]byte(r.Header.Get("X-Admin-Token")), []byte(token)) != 1 {
+			writeErr(w, http.StatusUnauthorized, "invalid admin token")
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// adminWrite gates the admin write paths: admin changes are durable by
+// nature, so without a database they are refused, not faked.
+func adminWrite(w http.ResponseWriter) bool {
+	if dbStore == nil || !dbStore.Enabled() {
+		writeErr(w, http.StatusServiceUnavailable, "admin writes require the database — set DATABASE_URL")
+		return false
+	}
+	return true
+}
+
+func handleAdminListShops(w http.ResponseWriter, r *http.Request) {
+	listAdminPlaces(w, dbStore.Shops)
+}
+
+func handleAdminListRiders(w http.ResponseWriter, r *http.Request) {
+	listAdminPlaces(w, dbStore.Riders)
+}
+
+func listAdminPlaces(w http.ResponseWriter, load func() ([]match.Place, error)) {
+	if dbStore == nil || !dbStore.Enabled() {
+		writeErr(w, http.StatusServiceUnavailable, "admin requires the database — set DATABASE_URL")
+		return
+	}
+	list, err := load()
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, list)
+}
+
+func handleAdminListProducts(w http.ResponseWriter, r *http.Request) {
+	if dbStore == nil || !dbStore.Enabled() {
+		writeErr(w, http.StatusServiceUnavailable, "admin requires the database — set DATABASE_URL")
+		return
+	}
+	writeJSON(w, http.StatusOK, cat.All())
+}
+
+type upsertShopBody struct {
+	Name   string  `json:"name"`
+	Lat    float64 `json:"lat"`
+	Lng    float64 `json:"lng"`
+	Active bool    `json:"active"`
+}
+
+// handleAdminUpsertShop inserts or replaces a shop; dispatch reads the live
+// tables, so the change takes effect on the next dispatch query.
+func handleAdminUpsertShop(w http.ResponseWriter, r *http.Request) {
+	if !adminWrite(w) {
+		return
+	}
+	var b upsertShopBody
+	if err := decodeStrict(w, r, &b); err != nil {
+		return
+	}
+	if b.Name == "" || b.Lat < -90 || b.Lat > 90 || b.Lng < -180 || b.Lng > 180 {
+		writeErr(w, http.StatusBadRequest, "shop needs a name and coordinates within [-90,90] × [-180,180]")
+		return
+	}
+	if err := dbStore.UpsertShop(store.SeedShop{ID: r.PathValue("id"), Name: b.Name, Lat: b.Lat, Lng: b.Lng, Active: b.Active}); err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"id": r.PathValue("id"), "ok": true})
+}
+
+type upsertRiderBody struct {
+	Name      string  `json:"name"`
+	Lat       float64 `json:"lat"`
+	Lng       float64 `json:"lng"`
+	Available bool    `json:"available"`
+}
+
+func handleAdminUpsertRider(w http.ResponseWriter, r *http.Request) {
+	if !adminWrite(w) {
+		return
+	}
+	var b upsertRiderBody
+	if err := decodeStrict(w, r, &b); err != nil {
+		return
+	}
+	if b.Name == "" || b.Lat < -90 || b.Lat > 90 || b.Lng < -180 || b.Lng > 180 {
+		writeErr(w, http.StatusBadRequest, "rider needs a name and coordinates within [-90,90] × [-180,180]")
+		return
+	}
+	if err := dbStore.UpsertRider(store.SeedRider{ID: r.PathValue("id"), Name: b.Name, Lat: b.Lat, Lng: b.Lng, Available: b.Available}); err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"id": r.PathValue("id"), "ok": true})
+}
+
+type upsertProductBody struct {
+	Name       string `json:"name"`
+	Category   string `json:"category"`
+	Brand      string `json:"brand"`
+	Size       string `json:"size"`
+	PriceMinor int64  `json:"price_minor"`
+	Image      string `json:"image"`
+	ShopID     string `json:"shop_id"`
+}
+
+// handleAdminUpsertProduct writes a catalog row and reloads the catalog
+// snapshot (and the order service that reads it) so the change is live
+// without a restart.
+func handleAdminUpsertProduct(w http.ResponseWriter, r *http.Request) {
+	if !adminWrite(w) {
+		return
+	}
+	var b upsertProductBody
+	if err := decodeStrict(w, r, &b); err != nil {
+		return
+	}
+	if err := dbStore.UpsertProduct(store.SeedProduct{
+		ID: r.PathValue("id"), Name: b.Name, Category: b.Category, Brand: b.Brand,
+		Size: b.Size, PriceMinor: b.PriceMinor, Image: b.Image, ShopID: b.ShopID,
+	}); err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	p, err := catalog.NewDB(dbStore)
+	if err != nil {
+		log.Printf("admin product upsert: catalog reload failed (%v) — restart required", err)
+	} else {
+		cat = p
+		orderSvc = orders.NewService(cat, places, dbStore.DB())
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"id": r.PathValue("id"), "ok": true})
+}
+
+// handleAdminCommission renders the fixed Ujrah schedule for a shop's
+// monthly orders and sales (settlement calculator for the console). The
+// schedule itself is fixed by the product specification — it is computed,
+// never stored or edited.
+func handleAdminCommission(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	monthlyOrders, err1 := strconv.ParseInt(q.Get("orders"), 10, 64)
+	salesMinor, err2 := strconv.ParseInt(q.Get("sales"), 10, 64)
+	if err1 != nil || err2 != nil {
+		writeErr(w, http.StatusBadRequest, "orders and sales must be integers (sales in minor units)")
+		return
+	}
+	commission, rateBps, capped, err := finance.CommissionMinor(monthlyOrders, salesMinor)
+	switch {
+	case err == nil:
+	case errors.Is(err, finance.ErrNegative), errors.Is(err, finance.ErrOutOfBounds):
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	default:
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"monthly_orders":      monthlyOrders,
+		"sales_minor":         salesMinor,
+		"commission_minor":    commission,
+		"commission_rate_bps": rateBps,
+		"commission_capped":   capped,
+	})
+}
+
+// decodeStrict decodes a JSON body with a size cap and unknown-field
+// rejection; on failure it has already written the 400.
+func decodeStrict(w http.ResponseWriter, r *http.Request, v any) error {
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(v); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid JSON body: "+err.Error())
+		return err
+	}
+	return nil
 }
 
 func handlePrivacy(w http.ResponseWriter, r *http.Request) {

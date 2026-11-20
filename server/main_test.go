@@ -646,3 +646,131 @@ func TestShopAndRiderOrderAPIs(t *testing.T) {
 		t.Fatalf("unknown order confirm = %d, want 404", resp.StatusCode)
 	}
 }
+
+// The admin console is default-deny: an unset (or empty) ADMIN_TOKEN
+// disables it entirely.
+func TestAdminAPIDisabledWithoutToken(t *testing.T) {
+	t.Setenv("ADMIN_TOKEN", "")
+	srv := httptest.NewServer(secureHeaders(newMux()))
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL + "/api/v1/admin/products")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("admin without token = %d, want 503 (disabled)", resp.StatusCode)
+	}
+}
+
+// Admin API: constant-time token auth, live dispatch/catalog writes and the
+// commission settlement view.
+func TestAdminAPIAuthAndUpserts(t *testing.T) {
+	t.Setenv("ADMIN_TOKEN", "test-secret")
+
+	st, err := store.Open("file::memory:?cache=shared")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	if err := st.EnsureSchema(); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SeedIfEmpty(store.SeedShops(), store.SeedRiders(), store.SeedProducts()); err != nil {
+		t.Fatal(err)
+	}
+	// Preserve the no-DB defaults for later tests.
+	origCat, origPlaces, origDB := cat, places, dbStore
+	t.Cleanup(func() { cat, places, dbStore = origCat, origPlaces, origDB; orderSvc = nil })
+	dbStore = st
+	places = st
+
+	srv := httptest.NewServer(secureHeaders(newMux()))
+	defer srv.Close()
+
+	do := func(method, url, token, body string) (*http.Response, []byte) {
+		var req *http.Request
+		var err error
+		if body == "" {
+			req, err = http.NewRequest(method, srv.URL+url, nil)
+		} else {
+			req, err = http.NewRequest(method, srv.URL+url, strings.NewReader(body))
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		if token != "" {
+			req.Header.Set("X-Admin-Token", token)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		raw, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		return resp, raw
+	}
+
+	// Wrong token → 401 (throttled by the rate limiter wrapping auth).
+	resp, _ := do("GET", "/api/v1/admin/products", "wrong-token", "")
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("wrong admin token = %d, want 401", resp.StatusCode)
+	}
+
+	// Upsert a shop → dispatch serves it live.
+	resp, raw := do("PUT", "/api/v1/admin/shops/s-dha", "test-secret",
+		`{"name":"DHA Store","lat":24.825,"lng":67.070,"active":true}`)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("upsert shop = %d, want 200; body %s", resp.StatusCode, raw)
+	}
+
+	resp, raw = do("GET", "/api/v1/match/shop?lat=24.825&lng=67.070", "", "")
+	if resp.StatusCode != http.StatusOK || !strings.Contains(string(raw), `"id":"s-dha"`) {
+		t.Fatalf("dispatch after admin upsert = %d %s; want s-dha", resp.StatusCode, raw)
+	}
+
+	// Upsert a product → catalog (and order service) reload live.
+	resp, raw = do("PUT", "/api/v1/admin/products/gajar-1kg", "test-secret",
+		`{"name":"Gajar ka Halal Mix","category":"grocery","brand":"noor","size":"1kg","price_minor":50000,"image":"/static/img/grocery.svg","shop_id":"s-dha"}`)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("upsert product = %d, want 200; body %s", resp.StatusCode, raw)
+	}
+	resp, raw = do("GET", "/api/v1/admin/products", "test-secret", "")
+	if resp.StatusCode != http.StatusOK || !strings.Contains(string(raw), "gajar-1kg") {
+		t.Fatalf("admin product list = %d %s; want gajar-1kg (live reload)", resp.StatusCode, raw)
+	}
+
+	resp, raw = do("POST", "/api/v1/orders", "",
+		`{"items":[{"product_id":"gajar-1kg","qty":1}],"lat":24.825,"lng":67.070}`)
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("order for the new product = %d, want 201; body %s", resp.StatusCode, raw)
+	}
+	var o orders.Order
+	if err := json.Unmarshal(raw, &o); err != nil {
+		t.Fatal(err)
+	}
+	if o.ShopID != "s-dha" {
+		t.Fatalf("order shop = %q, want s-dha (catalog reloaded)", o.ShopID)
+	}
+
+	// Commission settlement view — 250 orders @ 700 bps on 100,000 major.
+	resp, raw = do("GET", "/api/v1/admin/commission?orders=250&sales=10000000", "test-secret", "")
+	if resp.StatusCode != http.StatusOK || !strings.Contains(string(raw), `"commission_rate_bps":700`) || !strings.Contains(string(raw), `"commission_minor":700000`) {
+		t.Fatalf("commission = %d %s", resp.StatusCode, raw)
+	}
+	resp, _ = do("GET", "/api/v1/admin/commission?orders=abc&sales=1", "test-secret", "")
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("commission bad input = %d, want 400", resp.StatusCode)
+	}
+
+	// Malformed admin bodies are rejected loudly.
+	resp, _ = do("PUT", "/api/v1/admin/shops/s-bad", "test-secret", `{"nope":1}`)
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("unknown admin field = %d, want 400", resp.StatusCode)
+	}
+	resp, _ = do("PUT", "/api/v1/admin/shops/s-bad", "test-secret", `{"name":"X","lat":999,"lng":0,"active":true}`)
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("admin out-of-range coords = %d, want 400", resp.StatusCode)
+	}
+}
