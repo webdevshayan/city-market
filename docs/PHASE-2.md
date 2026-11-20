@@ -50,5 +50,4 @@ and the CSRF middleware — all under the strict CSP started in Phase 1.
 ## Next: Phase 3 — Matching Engine
 
 Nearest shop/rider matching, Turso (libSQL) wiring behind the catalog and
-cart providers, rate limiting on public endpoints, and the `Nitroping`
-integration.
+cart providers, and rate limiting on public endpoints.

@@ -25,7 +25,7 @@ apps/citizen   Flutter customer app (Phase 4)
 apps/shop      Flutter shop dashboard (Phase 4)
 apps/rider     Flutter rider app (Phase 4)
 apps/admin     Flutter admin console (Phase 4)
-server         Go HTTP server — API + HTMX web frontend (SEO/AEO, CSRF)
+server         Go HTTP server — API + HTMX frontend, matching engine, Turso
 web            Tailwind build: scans Go templates, emits ONE minified stylesheet
 docs           Phase notes and decisions
 scripts        build tooling (stylesheet build)
@@ -56,9 +56,11 @@ directories. Set `BASE_URL` so canonical tags, Open Graph and the generated
 ## Phases
 
 1. **Financial engine & scaffolding** — merged (PR #1).
-2. **Web frontend** — this phase: HTMX + pretty shareable URLs, legal pages,
-   FAQ + JSON-LD, dynamic sitemap/robots, CSRF middleware.
-3. **Matching engine** — nearest shop/rider logic, Turso wiring.
+2. **Web frontend** — merged (PR #2): HTMX + pretty shareable URLs, legal
+   pages, FAQ + JSON-LD, dynamic sitemap/robots, CSRF middleware.
+3. **Matching engine & Turso** — this phase: nearest shop/rider dispatch,
+   libSQL-backed catalog/carts/dispatch data behind small interfaces,
+   per-IP rate limiting on the public API.
 4. **Flutter apps** — citizen, shop, rider, admin.
 
 Each phase lands as a pull request describing what changed, how it was
