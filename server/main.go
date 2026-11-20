@@ -33,7 +33,11 @@ func mustTpl(files ...string) *template.Template {
 	return template.Must(template.ParseFS(content, files...))
 }
 
-var tplHome = mustTpl("templates/base.html", "templates/home.html")
+var (
+	tplHome    = mustTpl("templates/base.html", "templates/home.html")
+	tplPrivacy = mustTpl("templates/base.html", "templates/privacy.html")
+	tplTerms   = mustTpl("templates/base.html", "templates/terms.html")
+)
 
 func main() {
 	port := os.Getenv("PORT")
@@ -54,6 +58,8 @@ func newMux() *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.Handle("GET /static/", http.StripPrefix("/static/", noDirectoryListing(http.FileServer(http.FS(staticRoot)))))
 	mux.HandleFunc("GET /{$}", handleHome)
+	mux.HandleFunc("GET /privacy", handlePrivacy)
+	mux.HandleFunc("GET /terms", handleTerms)
 	mux.HandleFunc("GET /healthz", handleHealth)
 	mux.HandleFunc("GET /api/v1/finance/ujrah", handleUjrah)
 	mux.HandleFunc("GET /api/v1/finance/rider", handleRiderPayout)
@@ -131,6 +137,18 @@ func handleHome(w http.ResponseWriter, r *http.Request) {
 	renderHTML(w, http.StatusOK, tplHome, baseData(r,
 		"City Market — 100% Halal delivery marketplace",
 		"Certified-Halal shops, fixed rider pay and transparent tiered commissions (Ujrah). One flat delivery fee at checkout."))
+}
+
+func handlePrivacy(w http.ResponseWriter, r *http.Request) {
+	renderHTML(w, http.StatusOK, tplPrivacy, baseData(r,
+		"Privacy Policy — City Market",
+		"What City Market collects, why, who it is shared with, and your rights over your data."))
+}
+
+func handleTerms(w http.ResponseWriter, r *http.Request) {
+	renderHTML(w, http.StatusOK, tplTerms, baseData(r,
+		"Terms of Service — City Market",
+		"The rules of the City Market marketplace, including the Halal commitment and the refund policy."))
 }
 
 func handleHealth(w http.ResponseWriter, r *http.Request) {
