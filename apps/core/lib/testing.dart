@@ -129,19 +129,32 @@ class FakeApi implements ApiClient {
   @override
   Future<Order> confirmOrder(String id) async {
     confirmCalls.add(id);
+    _apply(id, statusConfirmed);
     return _withStatus(placedOrder, statusConfirmed);
   }
 
   @override
   Future<Order> pickUpOrder(String id) async {
     pickUpCalls.add(id);
+    _apply(id, statusPickedUp);
     return _withStatus(placedOrder, statusPickedUp);
   }
 
   @override
   Future<Order> deliverOrder(String id) async {
     deliverCalls.add(id);
+    _apply(id, statusDelivered);
     return _withStatus(placedOrder, statusDelivered);
+  }
+
+  /// Reflects the transition in the canned list, the way the real backend
+  /// would — so a screen that reloads after advancing sees the new status.
+  void _apply(String id, String status) {
+    for (var i = 0; i < orders_.length; i++) {
+      if (orders_[i].id == id) {
+        orders_[i] = _withStatus(orders_[i], status);
+      }
+    }
   }
 
   @override
