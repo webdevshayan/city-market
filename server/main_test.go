@@ -112,3 +112,47 @@ func TestShopPrettyURLs(t *testing.T) {
 		}
 	}
 }
+
+// HTMX requests get the #shop-main fragment only (never a full page), and
+// invalid filters under HTMX stay un-swapped with a 404.
+func TestShopHXPartials(t *testing.T) {
+	srv := httptest.NewServer(secureHeaders(newMux()))
+	defer srv.Close()
+
+	req, err := http.NewRequest("GET", srv.URL+"/shop/meat", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("HX-Request", "true")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("HX GET /shop/meat: %v", err)
+	}
+	body, err := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("HX GET /shop/meat = %d, want 200", resp.StatusCode)
+	}
+	if strings.Contains(string(body), "<!doctype") {
+		t.Fatal("HX response must be a fragment, not a full page")
+	}
+	for _, want := range []string{`id="shop-main"`, "Mutton Leg Cuts", "chip-active"} {
+		if !strings.Contains(string(body), want) {
+			t.Fatalf("HX fragment missing %q", want)
+		}
+	}
+
+	req2, _ := http.NewRequest("GET", srv.URL+"/shop/electronics", nil)
+	req2.Header.Set("HX-Request", "true")
+	resp2, err := http.DefaultClient.Do(req2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp2.Body.Close()
+	if resp2.StatusCode != http.StatusNotFound {
+		t.Fatalf("HX invalid filter = %d, want 404", resp2.StatusCode)
+	}
+}

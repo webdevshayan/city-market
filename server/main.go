@@ -38,7 +38,8 @@ var (
 	tplHome     = mustTpl("templates/base.html", "templates/home.html")
 	tplPrivacy  = mustTpl("templates/base.html", "templates/privacy.html")
 	tplTerms    = mustTpl("templates/base.html", "templates/terms.html")
-	tplShop     = mustTpl("templates/base.html", "templates/shop.html", "templates/partials/grid.html")
+	tplShop     = mustTpl("templates/base.html", "templates/shop.html", "templates/partials/shop-main.html", "templates/partials/grid.html")
+	tplShopMain = mustTpl("templates/partials/shop-main.html", "templates/partials/grid.html")
 	tplGrid     = mustTpl("templates/partials/grid.html")
 	tplNotFound = mustTpl("templates/base.html", "templates/notfound.html")
 )
@@ -227,6 +228,13 @@ func handleShop(w http.ResponseWriter, r *http.Request) {
 	brand := r.PathValue("brand")
 	size := r.PathValue("size")
 	if !catalog.ValidFilter(category, brand, size) {
+		if r.Header.Get("HX-Request") == "true" {
+			// htmx does not swap 4xx responses by default, so the grid stays
+			// as-is; direct loads of a hand-crafted bad URL still get the
+			// full branded 404 page below.
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
 		render404(w, r)
 		return
 	}
@@ -254,6 +262,13 @@ func handleShop(w http.ResponseWriter, r *http.Request) {
 				data.SizeLinks = append(data.SizeLinks, FilterLink{Name: catalog.Display(s), URL: brandBase + "/" + s, Active: s == size})
 			}
 		}
+	}
+	if r.Header.Get("HX-Request") == "true" {
+		// HTMX swaps just the shop-main region; hx-push-url keeps the pretty
+		// URL in the address bar, and direct loads of that URL render the
+		// full page with the same pre-filtered state.
+		renderHTML(w, http.StatusOK, tplShopMain, "shopMain", data)
+		return
 	}
 	renderHTML(w, http.StatusOK, tplShop, "base", data)
 }
