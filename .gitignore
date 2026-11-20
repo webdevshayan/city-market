@@ -29,3 +29,6 @@ skills/
 # --- Misc ---
 *.log
 .DS_Store
+
+# --- Flutter ---
+apps/*/build/
