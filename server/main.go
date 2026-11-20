@@ -3,10 +3,10 @@
 // which runs a standard Go server from the project root and expects it to
 // listen on the PORT environment variable.
 //
-// Phase 1 scope: health check, the Halal financial engine API, and one
-// html/template-rendered page proving the template + stylesheet pipeline.
-// Phase 2 adds the full HTMX web frontend, legal pages, SEO/AEO and the
-// complete security suite (CSRF middleware, strict CSP).
+// Phase 2 scope: semantic HTML layout with a global footer, legal pages,
+// FAQ + JSON-LD, the HTMX shop with pretty shareable URLs, dynamic
+// sitemap.xml/robots.txt, CSRF middleware for HTMX posts, and the strict CSP
+// started in Phase 1.
 package main
 
 import (
@@ -27,7 +27,13 @@ import (
 //go:embed templates static
 var content embed.FS
 
-var homeTpl = template.Must(template.ParseFS(content, "templates/home.html"))
+// mustTpl parses a page template set: base.html defines the layout ("base"),
+// each page file overrides the layout's "content" block.
+func mustTpl(files ...string) *template.Template {
+	return template.Must(template.ParseFS(content, files...))
+}
+
+var tplHome = mustTpl("templates/base.html", "templates/home.html")
 
 func main() {
 	port := os.Getenv("PORT")
@@ -56,9 +62,47 @@ func newMux() *http.ServeMux {
 	return mux
 }
 
-// secureHeaders is the Phase-1 groundwork for the full Phase-2 security
-// suite: every response carries a restrictive CSP with no inline script
-// allowance, plus the standard no-sniff / frame / referrer guards.
+func baseURL() string {
+	if b := os.Getenv("BASE_URL"); b != "" {
+		return b
+	}
+	return "http://localhost:3000"
+}
+
+// PageData carries everything a page's template may need; each handler sets
+// only the fields relevant to it.
+type PageData struct {
+	Title       string
+	Description string
+	Path        string // request path; used for canonical + og:url
+	BaseURL     string
+	Year        int
+}
+
+// baseData fills the fields every page shares.
+func baseData(r *http.Request, title, description string) PageData {
+	return PageData{
+		Title:       title,
+		Description: description,
+		Path:        r.URL.Path,
+		BaseURL:     baseURL(),
+		Year:        time.Now().Year(),
+	}
+}
+
+// renderHTML sends an HTML response. Headers go out before the template runs,
+// so a mid-render failure can only log — never corrupt the status line.
+func renderHTML(w http.ResponseWriter, status int, tpl *template.Template, data PageData) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(status)
+	if err := tpl.Execute(w, data); err != nil {
+		log.Printf("render %s: %v", data.Path, err)
+	}
+}
+
+// secureHeaders is the security baseline (Phase 1 review groundwork):
+// every response carries a restrictive CSP with no inline script allowance,
+// plus the standard no-sniff / frame / referrer guards.
 func secureHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		h := w.Header()
@@ -84,20 +128,9 @@ func noDirectoryListing(next http.Handler) http.Handler {
 }
 
 func handleHome(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	data := struct {
-		Title   string
-		Tagline string
-		Year    int
-	}{
-		Title:   "City Market",
-		Tagline: "100% Halal delivery, fair to shops and riders",
-		Year:    time.Now().Year(),
-	}
-	if err := homeTpl.Execute(w, data); err != nil {
-		log.Printf("render home: %v", err)
-		http.Error(w, "template render error", http.StatusInternalServerError)
-	}
+	renderHTML(w, http.StatusOK, tplHome, baseData(r,
+		"City Market — 100% Halal delivery marketplace",
+		"Certified-Halal shops, fixed rider pay and transparent tiered commissions (Ujrah). One flat delivery fee at checkout."))
 }
 
 func handleHealth(w http.ResponseWriter, r *http.Request) {

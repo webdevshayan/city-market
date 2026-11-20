@@ -1,0 +1,40 @@
+{{define "base"}}<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{.Title}}</title>
+  <meta name="description" content="{{.Description}}">
+  <link rel="canonical" href="{{.BaseURL}}{{.Path}}">
+  <meta property="og:title" content="{{.Title}}">
+  <meta property="og:description" content="{{.Description}}">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="{{.BaseURL}}{{.Path}}">
+  <meta property="og:site_name" content="City Market">
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body class="bg-neutral-50 text-neutral-900 antialiased flex min-h-screen flex-col">
+  <header class="border-b border-neutral-200 bg-white">
+    <nav aria-label="Main navigation" class="mx-auto flex max-w-5xl items-center justify-between px-4 py-4">
+      <a href="/" class="text-lg font-bold text-halal-700">City Market</a>
+      <div class="flex items-center gap-4">
+        <a href="/shop" class="text-sm font-medium text-neutral-600 hover:text-halal-700">Shop</a>
+      </div>
+    </nav>
+  </header>
+
+  <main class="mx-auto w-full max-w-5xl flex-1 px-4 py-10">
+    {{block "content" .}}{{end}}
+  </main>
+
+  <footer class="border-t border-neutral-200 bg-white">
+    <div class="mx-auto flex max-w-5xl flex-wrap items-center justify-between gap-2 px-4 py-6 text-sm text-neutral-500">
+      <span>© {{.Year}} City Market — 100% Halal delivery</span>
+      <nav aria-label="Legal" class="flex gap-4">
+        <a href="/privacy" class="hover:text-halal-700">Privacy Policy</a>
+        <a href="/terms" class="hover:text-halal-700">Terms of Service</a>
+      </nav>
+    </div>
+  </footer>
+</body>
+</html>{{end}}
