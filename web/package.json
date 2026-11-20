@@ -1,0 +1,11 @@
+{
+  "name": "city-market-web",
+  "private": true,
+  "description": "Tailwind build for City Market: scans Go templates + Go source and emits ONE minified stylesheet served by the Go server. No CDN.",
+  "scripts": {
+    "build:css": "tailwindcss -c tailwind.config.js -i input.css -o ../server/static/styles.css --minify"
+  },
+  "devDependencies": {
+    "tailwindcss": "^3.4.17"
+  }
+}

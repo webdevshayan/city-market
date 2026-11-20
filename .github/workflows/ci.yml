@@ -1,0 +1,86 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  server:
+    name: Go server — vet, Halal-math tests, build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: server
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: server/go.mod
+      - name: Vet
+        run: go vet ./...
+      - name: Test (financial engine)
+        run: go test ./... -v
+      - name: Build
+        run: go build -v ./...
+
+  web:
+    name: Tailwind — one minified stylesheet
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Build stylesheet
+        run: |
+          cd web
+          npm ci
+          npx tailwindcss -c tailwind.config.js -i input.css -o ../server/static/styles.css --minify
+      - name: Fail if the stylesheet is missing or trivially small
+        run: |
+          size=$(wc -c < server/static/styles.css)
+          echo "styles.css bytes: ${size}"
+          [ "${size}" -gt 500 ] || { echo "::error::styles.css is suspiciously small (${size} bytes)"; exit 1; }
+      - name: Upload stylesheet (artifact, 1-day retention)
+        uses: actions/upload-artifact@v4
+        with:
+          name: styles-css
+          path: server/static/styles.css
+          retention-days: 1
+          if-no-files-found: error
+
+  # Storage policy: no permanent heavy files. Uploads live for 1 day
+  # (retention-days: 1) and this job force-deletes anything older, so the
+  # repository never accumulates heavy artifacts.
+  cleanup:
+    name: Storage cleanup — delete stale artifacts
+    needs: [server, web]
+    if: always()
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+    steps:
+      - name: Delete artifacts older than 24 hours
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          repo="${GITHUB_REPOSITORY}"
+          cutoff=$(( $(date -u +%s) - 86400 ))
+          gh api "repos/${repo}/actions/artifacts" --paginate \
+            --jq '.artifacts[] | [.id, .created_at] | @tsv' |
+          while IFS=$'\t' read -r id created; do
+            [ -n "${id}" ] || continue
+            ts=$(date -u -d "${created}" +%s)
+            if [ "${ts}" -lt "${cutoff}" ]; then
+              echo "deleting artifact ${id} (created ${created})"
+              gh api -X DELETE "repos/${repo}/actions/artifacts/${id}"
+            fi
+          done
+          echo "cleanup pass complete"
