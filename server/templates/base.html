@@ -17,12 +17,13 @@
   <script src="/static/js/htmx.min.js" defer></script>
   <link rel="stylesheet" href="/static/styles.css">
 </head>
-<body class="bg-neutral-50 text-neutral-900 antialiased flex min-h-screen flex-col">
+<body {{if .CSRFToken}}hx-headers='{"X-CSRF-Token": "{{.CSRFToken}}"}' {{end}}class="bg-neutral-50 text-neutral-900 antialiased flex min-h-screen flex-col">
   <header class="border-b border-neutral-200 bg-white">
     <nav aria-label="Main navigation" class="mx-auto flex max-w-5xl items-center justify-between px-4 py-4">
       <a href="/" class="text-lg font-bold text-halal-700">City Market</a>
       <div class="flex items-center gap-4">
         <a href="/shop" class="text-sm font-medium text-neutral-600 hover:text-halal-700">Shop</a>
+        {{template "cartCount" .}}
       </div>
     </nav>
   </header>

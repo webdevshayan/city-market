@@ -8,7 +8,11 @@
     <img src="{{.Image}}" alt="{{.Name}}" width="240" height="240" loading="lazy" class="w-full rounded-md">
     <h3 class="text-sm font-semibold">{{.Name}}</h3>
     <p class="font-bold text-halal-700">{{.PriceText}} <span class="text-xs font-normal text-neutral-500">{{.Size}}</span></p>
-    <button type="button" class="btn-primary mt-auto" data-product="{{.ID}}">Add to Cart</button>
+    <button type="button" class="btn-primary mt-auto"
+            hx-post="/cart/add"
+            hx-vals='{"product_id":"{{.ID}}"}'
+            hx-target="#cart-count"
+            hx-swap="outerHTML">Add to Cart</button>
   </article>
   {{end}}
 </section>

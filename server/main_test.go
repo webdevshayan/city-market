@@ -3,9 +3,13 @@ package main
 import (
 	"io"
 	"net/http"
+	"net/http/cookiejar"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
+
+	"github.com/webdevshayan/city-market/server/csrf"
 )
 
 // Review finding M2: directory listings must be blocked; real files stay up.
@@ -154,5 +158,117 @@ func TestShopHXPartials(t *testing.T) {
 	defer resp2.Body.Close()
 	if resp2.StatusCode != http.StatusNotFound {
 		t.Fatalf("HX invalid filter = %d, want 404", resp2.StatusCode)
+	}
+}
+
+// End-to-end: CSRF double-submit protection plus the cart flow, with cookie
+// hardening, form-field fallback, HX badge swap and rejection paths.
+func TestCSRFAndCartFlow(t *testing.T) {
+	srv := httptest.NewServer(secureHeaders(csrf.Middleware(sessionCookie(newMux()))))
+	defer srv.Close()
+
+	jar, err := cookiejar.New(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := &http.Client{
+		Jar: jar,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+	base, _ := url.Parse(srv.URL)
+
+	// Fresh POST with no cookies at all → 403.
+	resp, err := client.PostForm(srv.URL+"/cart/add", url.Values{"product_id": {"beef-1kg"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	io.Copy(io.Discard, resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("POST without CSRF token = %d, want 403", resp.StatusCode)
+	}
+
+	// First GET issues the hardened cookies and embeds the token in the page.
+	resp, err = client.Get(srv.URL + "/shop")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET /shop = %d, want 200", resp.StatusCode)
+	}
+	var token string
+	for _, c := range jar.Cookies(base) {
+		if c.Name == "cm_csrf" {
+			token = c.Value
+		}
+	}
+	if token == "" {
+		t.Fatal("GET must issue the cm_csrf cookie")
+	}
+	if !strings.Contains(string(body), "X-CSRF-Token") {
+		t.Fatal("page must embed the CSRF token for hx-headers")
+	}
+
+	// Form-field fallback POST (no htmx) → 303 back to /shop.
+	resp, err = client.PostForm(srv.URL+"/cart/add", url.Values{"product_id": {"beef-1kg"}, "_csrf": {token}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	io.Copy(io.Discard, resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusSeeOther {
+		t.Fatalf("valid form-field POST = %d, want 303", resp.StatusCode)
+	}
+
+	// The full page now shows the updated cart badge.
+	resp, err = client.Get(srv.URL + "/shop")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ = io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if !strings.Contains(string(body), "Cart (1)") {
+		t.Fatalf("cart badge not updated; body: %s", body)
+	}
+
+	// HX POST with the header token swaps the badge fragment.
+	req, _ := http.NewRequest("POST", srv.URL+"/cart/add", strings.NewReader(url.Values{"product_id": {"beef-1kg"}}.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("HX-Request", "true")
+	req.Header.Set("X-CSRF-Token", token)
+	resp, err = client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ = io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK || !strings.Contains(string(body), "Cart (2)") {
+		t.Fatalf("HX POST = %d, body %s; want fragment Cart (2)", resp.StatusCode, body)
+	}
+
+	// Wrong token → 403; unknown product with valid token → 400.
+	for _, tc := range []struct {
+		name, product, token string
+		want                 int
+	}{
+		{"wrong token", "beef-1kg", "wrong-token", http.StatusForbidden},
+		{"unknown product", "nope", token, http.StatusBadRequest},
+	} {
+		req, _ := http.NewRequest("POST", srv.URL+"/cart/add", strings.NewReader(url.Values{"product_id": {tc.product}}.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.Header.Set("X-CSRF-Token", tc.token)
+		resp, err := client.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		io.Copy(io.Discard, resp.Body)
+		resp.Body.Close()
+		if resp.StatusCode != tc.want {
+			t.Fatalf("%s: POST = %d, want %d", tc.name, resp.StatusCode, tc.want)
+		}
 	}
 }
