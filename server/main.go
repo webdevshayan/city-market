@@ -66,7 +66,7 @@ var (
 // present.
 var (
 	cat     catalog.Provider = catalog.NewSeed()
-	carts                    = cart.NewStore()
+	carts   cart.Store       = cart.NewMemory()
 	dbStore *store.Store
 )
 
@@ -82,8 +82,8 @@ func main() {
 	log.Fatal(http.ListenAndServe(addr, secureHeaders(csrf.Middleware(sessionCookie(newMux())))))
 }
 
-// wireDatabase switches the catalog to Turso when DATABASE_URL is set (carts
-// and dispatch sources follow in the next commits). A failure to reach the
+// wireDatabase switches the catalog and carts to Turso when DATABASE_URL is
+// set (dispatch sources follow in the next commit). A failure to reach the
 // database degrades to the seed fixtures with a loud log line — the site
 // stays up rather than dying on boot, and operations sees the warning.
 func wireDatabase() {
@@ -116,7 +116,8 @@ func wireDatabase() {
 	}
 	cat = p
 	dbStore = st
-	log.Printf("catalog served from Turso")
+	carts = cart.NewDB(st.DB())
+	log.Printf("catalog and carts served from Turso")
 }
 
 func newMux() *http.ServeMux {
