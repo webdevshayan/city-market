@@ -161,6 +161,61 @@ func TestShopHXPartials(t *testing.T) {
 	}
 }
 
+// Sitemap and robots.txt are generated from the catalog.
+func TestSitemapAndRobots(t *testing.T) {
+	srv := httptest.NewServer(secureHeaders(newMux()))
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL + "/sitemap.xml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("sitemap = %d, want 200", resp.StatusCode)
+	}
+	if ct := resp.Header.Get("Content-Type"); !strings.HasPrefix(ct, "application/xml") {
+		t.Fatalf("sitemap Content-Type = %q, want application/xml", ct)
+	}
+	for _, want := range []string{
+		"<loc>http://localhost:3000/</loc>",
+		"<loc>http://localhost:3000/privacy</loc>",
+		"<loc>http://localhost:3000/terms</loc>",
+		"<loc>http://localhost:3000/shop</loc>",
+		"<loc>http://localhost:3000/shop/meat</loc>",
+		"<loc>http://localhost:3000/shop/meat/madina</loc>",
+		"<loc>http://localhost:3000/shop/meat/madina/1kg</loc>",
+	} {
+		if !strings.Contains(string(body), want) {
+			t.Fatalf("sitemap missing %q", want)
+		}
+	}
+	if strings.Contains(string(body), "/shop/grocery/al-safwa") {
+		t.Fatal("empty filter combinations must not be listed in the sitemap")
+	}
+
+	resp2, err := http.Get(srv.URL + "/robots.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body2, _ := io.ReadAll(resp2.Body)
+	resp2.Body.Close()
+	if resp2.StatusCode != http.StatusOK {
+		t.Fatalf("robots = %d, want 200", resp2.StatusCode)
+	}
+	for _, want := range []string{
+		"User-agent: *",
+		"Allow: /",
+		"Disallow: /static/",
+		"Sitemap: http://localhost:3000/sitemap.xml",
+	} {
+		if !strings.Contains(string(body2), want) {
+			t.Fatalf("robots.txt missing %q", want)
+		}
+	}
+}
+
 // End-to-end: CSRF double-submit protection plus the cart flow, with cookie
 // hardening, form-field fallback, HX badge swap and rejection paths.
 func TestCSRFAndCartFlow(t *testing.T) {
