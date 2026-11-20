@@ -25,7 +25,7 @@ apps/citizen   Flutter customer app (Phase 4)
 apps/shop      Flutter shop dashboard (Phase 4)
 apps/rider     Flutter rider app (Phase 4)
 apps/admin     Flutter admin console (Phase 4)
-server         Go HTTP server — API now, HTMX web frontend in Phase 2
+server         Go HTTP server — API + HTMX web frontend (SEO/AEO, CSRF)
 web            Tailwind build: scans Go templates, emits ONE minified stylesheet
 docs           Phase notes and decisions
 scripts        build tooling (stylesheet build)
@@ -44,18 +44,21 @@ cd server && go test ./... -v   # financial engine proofs
 cd server && go run .           # serve on :3000
 ```
 
-Security groundwork (full suite in Phase 2): every response carries a strict
-`Content-Security-Policy` with no inline-script allowance plus
-`X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy` and
-`Permissions-Policy` headers; HTML is rendered exclusively through Go's
-context-aware `html/template`.
+Security: every response carries a strict `Content-Security-Policy` with no
+inline-script allowance plus `X-Content-Type-Options`, `X-Frame-Options`,
+`Referrer-Policy` and `Permissions-Policy` headers; HTML is rendered
+exclusively through Go's context-aware `html/template`; state-changing
+requests (like the htmx cart) are protected by double-submit-cookie CSRF
+middleware with a constant-time token compare; `/static/` never lists
+directories. Set `BASE_URL` so canonical tags, Open Graph and the generated
+`/sitemap.xml` carry the production domain.
 
 ## Phases
 
-1. **Financial engine & scaffolding** — this phase.
-2. **Web frontend** — HTMX + pretty URLs + legal pages + SEO/AEO (JSON-LD,
-   sitemap, robots.txt) + full CSRF middleware.
-3. **Matching engine** — nearest shop/rider logic.
+1. **Financial engine & scaffolding** — merged (PR #1).
+2. **Web frontend** — this phase: HTMX + pretty shareable URLs, legal pages,
+   FAQ + JSON-LD, dynamic sitemap/robots, CSRF middleware.
+3. **Matching engine** — nearest shop/rider logic, Turso wiring.
 4. **Flutter apps** — citizen, shop, rider, admin.
 
 Each phase lands as a pull request describing what changed, how it was
