@@ -3,10 +3,10 @@
 // which runs a standard Go server from the project root and expects it to
 // listen on the PORT environment variable.
 //
-// Phase 2 scope: semantic HTML layout with a global footer, legal pages,
-// FAQ + JSON-LD, the HTMX shop with pretty shareable URLs, dynamic
-// sitemap.xml/robots.txt, CSRF middleware for HTMX posts, and the strict CSP
-// started in Phase 1.
+// Phase 3 scope: the dispatch matching engine (nearest shop/rider), Turso
+// (libSQL) wiring behind the catalog, carts and dispatch sources, and
+// per-IP rate limiting on the public API — on top of the Phase 2 frontend
+// and the Phase 1 financial engine and CSP baseline.
 package main
 
 import (
@@ -15,11 +15,13 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"encoding/xml"
+	"errors"
 	"fmt"
 	"html/template"
 	"io"
 	"io/fs"
 	"log"
+	"math"
 	"net/http"
 	"os"
 	"strconv"
@@ -30,6 +32,8 @@ import (
 	"github.com/webdevshayan/city-market/server/catalog"
 	"github.com/webdevshayan/city-market/server/csrf"
 	"github.com/webdevshayan/city-market/server/finance"
+	"github.com/webdevshayan/city-market/server/match"
+	"github.com/webdevshayan/city-market/server/ratelimit"
 	"github.com/webdevshayan/city-market/server/store"
 )
 
@@ -59,16 +63,46 @@ var (
 	tplNotFound  = pageTpl("templates/notfound.html")
 )
 
-// cat is the active catalog provider and carts the cart backend; dbStore is
-// set when DATABASE_URL is wired. Defaults are in-memory (seed catalog,
-// memory carts) so tests and local runs work with zero configuration;
-// main() switches to the Turso-backed implementations when the env var is
-// present.
+// cat is the active catalog provider, carts the cart backend, places the
+// dispatch-candidate source; dbStore is set when DATABASE_URL is wired.
+// Defaults are in-memory (seed catalog, memory carts, fixture places) so
+// tests and local runs work with zero configuration; main() switches to the
+// Turso-backed implementations when the env var is present.
 var (
 	cat     catalog.Provider = catalog.NewSeed()
 	carts   cart.Store       = cart.NewMemory()
+	places  placesSource     = seedPlaces{}
 	dbStore *store.Store
 )
+
+// placesSource supplies dispatch candidates to the matching API. *store.Store
+// implements it when Turso is wired; seedPlaces adapts the launch fixtures
+// otherwise.
+type placesSource interface {
+	Shops() ([]match.Place, error)
+	Riders() ([]match.Place, error)
+}
+
+// seedPlaces adapts the launch fixtures (the no-database fallback).
+type seedPlaces struct{}
+
+func (seedPlaces) Shops() ([]match.Place, error) {
+	src := store.SeedShops()
+	out := make([]match.Place, len(src))
+	for i, s := range src {
+		out[i] = match.Place{ID: s.ID, Name: s.Name, Pos: match.Point{Lat: s.Lat, Lng: s.Lng}, Active: s.Active}
+	}
+	return out, nil
+}
+
+func (seedPlaces) Riders() ([]match.Place, error) {
+	src := store.SeedRiders()
+	out := make([]match.Place, len(src))
+	for i, s := range src {
+		out[i] = match.Place{ID: s.ID, Name: s.Name, Pos: match.Point{Lat: s.Lat, Lng: s.Lng}, Active: s.Available}
+	}
+	return out, nil
+}
 
 func main() {
 	port := os.Getenv("PORT")
@@ -82,10 +116,10 @@ func main() {
 	log.Fatal(http.ListenAndServe(addr, secureHeaders(csrf.Middleware(sessionCookie(newMux())))))
 }
 
-// wireDatabase switches the catalog and carts to Turso when DATABASE_URL is
-// set (dispatch sources follow in the next commit). A failure to reach the
-// database degrades to the seed fixtures with a loud log line — the site
-// stays up rather than dying on boot, and operations sees the warning.
+// wireDatabase switches the catalog, carts and dispatch sources to Turso
+// when DATABASE_URL is set. A failure to reach the database degrades to the
+// seed fixtures with a loud log line — the site stays up rather than dying
+// on boot, and operations sees the warning.
 func wireDatabase() {
 	dsn := os.Getenv("DATABASE_URL")
 	if dsn == "" {
@@ -117,10 +151,20 @@ func wireDatabase() {
 	cat = p
 	dbStore = st
 	carts = cart.NewDB(st.DB())
-	log.Printf("catalog and carts served from Turso")
+	places = st
+	log.Printf("catalog, carts and dispatch data served from Turso")
 }
 
 func newMux() *http.ServeMux {
+	return newMuxWith(ratelimit.New(10, 20).Middleware, ratelimit.New(2, 8).Middleware)
+}
+
+// newMuxWith wires the route table. The two injectable middlewares
+// rate-limit the public API (read-only finance + match queries at 10/s
+// burst 20 per IP) and state-changing cart posts (2/s burst 8) — injectable
+// so tests can use tiny bursts deterministically. On Vercel the limiter is
+// per instance; a durable cross-instance limit needs shared state.
+func newMuxWith(apiLimit, cartLimit func(http.Handler) http.Handler) *http.ServeMux {
 	staticRoot, err := fs.Sub(content, "static")
 	if err != nil {
 		log.Fatalf("static assets unavailable: %v", err)
@@ -136,13 +180,15 @@ func newMux() *http.ServeMux {
 	mux.HandleFunc("GET /shop/{category}/{brand}", handleShop)
 	mux.HandleFunc("GET /shop/{category}/{brand}/{size}", handleShop)
 	mux.HandleFunc("GET /healthz", handleHealth)
-	mux.HandleFunc("GET /api/v1/finance/ujrah", handleUjrah)
-	mux.HandleFunc("GET /api/v1/finance/rider", handleRiderPayout)
-	mux.HandleFunc("GET /api/v1/finance/checkout-fee", handleCheckoutFee)
-	mux.HandleFunc("GET /api/v1/finance/simulate-month", handleSimulateMonth)
+	mux.Handle("GET /api/v1/finance/ujrah", apiLimit(http.HandlerFunc(handleUjrah)))
+	mux.Handle("GET /api/v1/finance/rider", apiLimit(http.HandlerFunc(handleRiderPayout)))
+	mux.Handle("GET /api/v1/finance/checkout-fee", apiLimit(http.HandlerFunc(handleCheckoutFee)))
+	mux.Handle("GET /api/v1/finance/simulate-month", apiLimit(http.HandlerFunc(handleSimulateMonth)))
+	mux.Handle("GET /api/v1/match/shop", apiLimit(http.HandlerFunc(handleMatchShop)))
+	mux.Handle("GET /api/v1/match/rider", apiLimit(http.HandlerFunc(handleMatchRider)))
 	mux.HandleFunc("GET /sitemap.xml", handleSitemap)
 	mux.HandleFunc("GET /robots.txt", handleRobots)
-	mux.HandleFunc("POST /cart/add", handleCartAdd)
+	mux.Handle("POST /cart/add", cartLimit(http.HandlerFunc(handleCartAdd)))
 	// Catch-all: anything unmatched gets the branded 404. Go's mux routes the
 	// most specific pattern first, so this never shadows the routes above.
 	mux.HandleFunc("GET /", render404)
@@ -538,6 +584,102 @@ func handleRobots(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	fmt.Fprintf(w, "User-agent: *\nAllow: /\nDisallow: /static/\n\nSitemap: %s/sitemap.xml\n", baseURL())
+}
+
+// parsePoint reads required lat/lng query params with range validation.
+func parsePoint(r *http.Request) (match.Point, error) {
+	latRaw := r.URL.Query().Get("lat")
+	lngRaw := r.URL.Query().Get("lng")
+	if latRaw == "" || lngRaw == "" {
+		return match.Point{}, errors.New("missing required query parameters: lat, lng")
+	}
+	lat, errLat := strconv.ParseFloat(latRaw, 64)
+	lng, errLng := strconv.ParseFloat(lngRaw, 64)
+	if errLat != nil || errLng != nil {
+		return match.Point{}, errors.New("lat and lng must be decimal degrees")
+	}
+	if lat < -90 || lat > 90 || lng < -180 || lng > 180 {
+		return match.Point{}, errors.New("lat must be within [-90, 90] and lng within [-180, 180]")
+	}
+	return match.Point{Lat: lat, Lng: lng}, nil
+}
+
+// handleMatchShop answers "which shop fulfils this order?" — the nearest
+// active shop to the customer, optionally restricted to the shop stocking a
+// given product. Dispatch reads the Turso store when wired, seed fixtures
+// otherwise; ties break deterministically (match.Nearest).
+func handleMatchShop(w http.ResponseWriter, r *http.Request) {
+	origin, err := parsePoint(r)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	shops, err := places.Shops()
+	if err != nil {
+		writeErr(w, http.StatusServiceUnavailable, "dispatch source unavailable")
+		return
+	}
+	if pid := r.URL.Query().Get("product"); pid != "" {
+		p, ok := cat.ByID(pid)
+		if !ok {
+			writeErr(w, http.StatusNotFound, "unknown product")
+			return
+		}
+		var stocking []match.Place
+		for _, s := range shops {
+			if s.ID == p.ShopID {
+				stocking = append(stocking, s)
+			}
+		}
+		shops = stocking
+	}
+	best, dist, err := match.Nearest(origin, shops)
+	if errors.Is(err, match.ErrNoCandidate) {
+		writeErr(w, http.StatusNotFound, "no shop available near you")
+		return
+	}
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"id":              best.ID,
+		"name":            best.Name,
+		"lat":             best.Pos.Lat,
+		"lng":             best.Pos.Lng,
+		"distance_meters": math.Round(dist),
+	})
+}
+
+// handleMatchRider answers "which rider takes this delivery?" — the nearest
+// available rider to the pickup point.
+func handleMatchRider(w http.ResponseWriter, r *http.Request) {
+	origin, err := parsePoint(r)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	riders, err := places.Riders()
+	if err != nil {
+		writeErr(w, http.StatusServiceUnavailable, "dispatch source unavailable")
+		return
+	}
+	best, dist, err := match.Nearest(origin, riders)
+	if errors.Is(err, match.ErrNoCandidate) {
+		writeErr(w, http.StatusNotFound, "no rider available right now")
+		return
+	}
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"id":              best.ID,
+		"name":            best.Name,
+		"lat":             best.Pos.Lat,
+		"lng":             best.Pos.Lng,
+		"distance_meters": math.Round(dist),
+	})
 }
 
 func handlePrivacy(w http.ResponseWriter, r *http.Request) {

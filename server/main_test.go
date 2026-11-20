@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/webdevshayan/city-market/server/csrf"
+	"github.com/webdevshayan/city-market/server/ratelimit"
 )
 
 // Review finding M2: directory listings must be blocked; real files stay up.
@@ -325,5 +326,87 @@ func TestCSRFAndCartFlow(t *testing.T) {
 		if resp.StatusCode != tc.want {
 			t.Fatalf("%s: POST = %d, want %d", tc.name, resp.StatusCode, tc.want)
 		}
+	}
+}
+
+// Phase 3 matching endpoints: nearest active shop/rider over the seed
+// fixtures (r-4 sits at the origin but is off duty — the skip-inactive path
+// is exercised through the API), product-restricted dispatch, and validation.
+func TestMatchEndpoints(t *testing.T) {
+	srv := httptest.NewServer(secureHeaders(newMux()))
+	defer srv.Close()
+
+	tests := []struct {
+		name   string
+		url    string
+		status int
+		want   string
+	}{
+		{"nearest shop at the central coords", "/api/v1/match/shop?lat=24.8607&lng=67.0011", 200, `"id":"s-central"`},
+		{"nearest available rider", "/api/v1/match/rider?lat=24.8607&lng=67.0011", 200, `"id":"r-1"`},
+		{"product-restricted shop despite distance", "/api/v1/match/shop?lat=24.8138&lng=67.0300&product=beef-1kg", 200, `"id":"s-central"`},
+		{"unknown product", "/api/v1/match/shop?lat=24.86&lng=67.00&product=nope", 404, "unknown product"},
+		{"missing coordinates", "/api/v1/match/shop", 400, "missing required query parameters"},
+		{"out-of-range latitude", "/api/v1/match/rider?lat=200&lng=67", 400, "within [-90, 90]"},
+		{"non-numeric longitude", "/api/v1/match/rider?lat=24&lng=abc", 400, "decimal degrees"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			resp, err := http.Get(srv.URL + tc.url)
+			if err != nil {
+				t.Fatal(err)
+			}
+			body, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			if resp.StatusCode != tc.status {
+				t.Fatalf("GET %s = %d, want %d", tc.url, resp.StatusCode, tc.status)
+			}
+			if !strings.Contains(string(body), tc.want) {
+				t.Fatalf("GET %s missing %q", tc.url, tc.want)
+			}
+		})
+	}
+
+	resp, err := http.Get(srv.URL + "/api/v1/match/shop?lat=24.8607&lng=67.0011")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if !strings.Contains(string(body), `"distance_meters":0`) {
+		t.Fatalf("distance at the shop's own coordinates must be 0; body: %s", body)
+	}
+}
+
+// The public API is rate limited per IP; a tiny burst makes the 429
+// deterministic.
+func TestPublicAPIRateLimited(t *testing.T) {
+	srv := httptest.NewServer(secureHeaders(newMuxWith(
+		ratelimit.New(1, 2).Middleware,
+		ratelimit.New(1, 2).Middleware,
+	)))
+	defer srv.Close()
+
+	for i := 0; i < 2; i++ {
+		resp, err := http.Get(srv.URL + "/api/v1/finance/checkout-fee")
+		if err != nil {
+			t.Fatal(err)
+		}
+		io.Copy(io.Discard, resp.Body)
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("request %d = %d, want 200", i+1, resp.StatusCode)
+		}
+	}
+	resp, err := http.Get(srv.URL + "/api/v1/finance/checkout-fee")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusTooManyRequests {
+		t.Fatalf("third request = %d, want 429", resp.StatusCode)
+	}
+	if resp.Header.Get("Retry-After") == "" {
+		t.Fatal("429 must carry Retry-After")
 	}
 }
