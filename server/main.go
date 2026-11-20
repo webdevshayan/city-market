@@ -191,6 +191,11 @@ func newMuxWith(apiLimit, cartLimit func(http.Handler) http.Handler) *http.Serve
 	mux.Handle("GET /api/v1/match/rider", apiLimit(http.HandlerFunc(handleMatchRider)))
 	mux.Handle("POST /api/v1/orders", cartLimit(http.HandlerFunc(handlePlaceOrder)))
 	mux.Handle("GET /api/v1/orders/{id}", apiLimit(http.HandlerFunc(handleGetOrder)))
+	mux.Handle("GET /api/v1/shop/orders", apiLimit(http.HandlerFunc(handleShopOrders)))
+	mux.Handle("GET /api/v1/rider/orders", apiLimit(http.HandlerFunc(handleRiderOrders)))
+	mux.Handle("POST /api/v1/shop/orders/{id}/confirm", cartLimit(http.HandlerFunc(handleOrderTransition(orders.StatusConfirmed))))
+	mux.Handle("POST /api/v1/rider/orders/{id}/pick-up", cartLimit(http.HandlerFunc(handleOrderTransition(orders.StatusPickedUp))))
+	mux.Handle("POST /api/v1/rider/orders/{id}/deliver", cartLimit(http.HandlerFunc(handleOrderTransition(orders.StatusDelivered))))
 	mux.HandleFunc("GET /sitemap.xml", handleSitemap)
 	mux.HandleFunc("GET /robots.txt", handleRobots)
 	mux.Handle("POST /cart/add", cartLimit(http.HandlerFunc(handleCartAdd)))
@@ -753,6 +758,56 @@ func handleGetOrder(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusNotFound, err.Error())
 	default:
 		writeErr(w, http.StatusInternalServerError, err.Error())
+	}
+}
+
+// handleShopOrders lists a shop's orders — the shop dashboard's queue.
+func handleShopOrders(w http.ResponseWriter, r *http.Request) {
+	listOrders(w, r, r.URL.Query().Get("shop_id"), "shop_id", orderSvc.ForShop)
+}
+
+// handleRiderOrders lists a rider's assigned orders.
+func handleRiderOrders(w http.ResponseWriter, r *http.Request) {
+	listOrders(w, r, r.URL.Query().Get("rider_id"), "rider_id", orderSvc.ForRider)
+}
+
+func listOrders(w http.ResponseWriter, r *http.Request, id, param string, load func(string) ([]orders.Order, error)) {
+	if orderSvc == nil {
+		writeErr(w, http.StatusServiceUnavailable, "orders require the database — set DATABASE_URL")
+		return
+	}
+	if id == "" {
+		writeErr(w, http.StatusBadRequest, "missing required query parameter: "+param)
+		return
+	}
+	list, err := load(id)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, list)
+}
+
+// handleOrderTransition returns the handler for one status step; legality
+// and stale-state guards live in the orders engine, and a skipped step or a
+// repeat is a 409, never a silent state change.
+func handleOrderTransition(to orders.Status) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if orderSvc == nil {
+			writeErr(w, http.StatusServiceUnavailable, "orders require the database — set DATABASE_URL")
+			return
+		}
+		o, err := orderSvc.Transition(r.PathValue("id"), to)
+		switch {
+		case err == nil:
+			writeJSON(w, http.StatusOK, o)
+		case errors.Is(err, orders.ErrUnknownOrder):
+			writeErr(w, http.StatusNotFound, err.Error())
+		case errors.Is(err, orders.ErrInvalidTransition):
+			writeErr(w, http.StatusConflict, err.Error())
+		default:
+			writeErr(w, http.StatusInternalServerError, err.Error())
+		}
 	}
 }
 
