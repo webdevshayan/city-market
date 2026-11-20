@@ -83,6 +83,9 @@ type PageData struct {
 	Path        string // request path; used for canonical + og:url
 	BaseURL     string
 	Year        int
+	Faqs        []FaqItem   // home page FAQ section
+	OrgJSONLD   template.JS // Organization node, emitted on every page
+	JSONLD      template.JS // page-specific node (FAQPage, ItemList, …)
 }
 
 // baseData fills the fields every page shares.
@@ -93,15 +96,63 @@ func baseData(r *http.Request, title, description string) PageData {
 		Path:        r.URL.Path,
 		BaseURL:     baseURL(),
 		Year:        time.Now().Year(),
+		OrgJSONLD:   orgJSONLD(baseURL()),
 	}
 }
 
-// renderHTML sends an HTML response. Headers go out before the template runs,
-// so a mid-render failure can only log — never corrupt the status line.
-func renderHTML(w http.ResponseWriter, status int, tpl *template.Template, data PageData) {
+// FaqItem feeds both the visible FAQ section and the FAQPage JSON-LD.
+type FaqItem struct {
+	Question string
+	Answer   string
+}
+
+var faqs = []FaqItem{
+	{Question: "Is the meat Halal?", Answer: "Yes — every shop is certified Halal before it can list, and certifications are re-checked by our admin team. If certification cannot be evidenced for an item, it is refunded in full."},
+	{Question: "What commission do shops pay?", Answer: "A tiered monthly fee on app sales: 0% up to 50 orders, 5% up to 200, 7% up to 500, and 9% beyond that — capped at 7000 per month. Never interest."},
+	{Question: "How much do riders earn?", Answer: "A fixed 60 per delivery plus 15 per kilometre, settled weekly."},
+	{Question: "What does delivery cost me?", Answer: "One flat fee, shown clearly at checkout — no surge pricing and no hidden charges."},
+	{Question: "What if an order goes wrong?", Answer: "Non-delivery is refunded 100%, wrong or spoiled items are refunded in full, and Halal doubts are refunded first and investigated after — see the refund policy in our Terms."},
+}
+
+// orgJSONLD renders the Organization graph node injected on every page.
+func orgJSONLD(base string) template.JS {
+	b, _ := json.Marshal(map[string]any{
+		"@context":    "https://schema.org",
+		"@type":       "Organization",
+		"name":        "City Market",
+		"url":         base,
+		"slogan":      "100% Halal delivery marketplace",
+		"description": "Certified-Halal shops with tiered Ujrah commissions, fixed rider pay and one flat delivery fee.",
+	})
+	return template.JS(b)
+}
+
+// faqJSONLD renders a FAQPage graph node for answer-engine optimization.
+func faqJSONLD(items []FaqItem) template.JS {
+	qa := make([]map[string]any, len(items))
+	for i, it := range items {
+		qa[i] = map[string]any{
+			"@type":          "Question",
+			"name":           it.Question,
+			"acceptedAnswer": map[string]any{"@type": "Answer", "text": it.Answer},
+		}
+	}
+	b, _ := json.Marshal(map[string]any{
+		"@context":   "https://schema.org",
+		"@type":      "FAQPage",
+		"mainEntity": qa,
+	})
+	return template.JS(b)
+}
+
+// renderHTML sends the named template of a page set as an HTML response.
+// Page sets always name their layout "base"; HTMX partials use their own
+// define names. Headers go out before the template runs, so a mid-render
+// failure can only log — never corrupt the status line.
+func renderHTML(w http.ResponseWriter, status int, tpl *template.Template, name string, data PageData) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(status)
-	if err := tpl.Execute(w, data); err != nil {
+	if err := tpl.ExecuteTemplate(w, name, data); err != nil {
 		log.Printf("render %s: %v", data.Path, err)
 	}
 }
@@ -134,19 +185,22 @@ func noDirectoryListing(next http.Handler) http.Handler {
 }
 
 func handleHome(w http.ResponseWriter, r *http.Request) {
-	renderHTML(w, http.StatusOK, tplHome, baseData(r,
+	data := baseData(r,
 		"City Market — 100% Halal delivery marketplace",
-		"Certified-Halal shops, fixed rider pay and transparent tiered commissions (Ujrah). One flat delivery fee at checkout."))
+		"Certified-Halal shops, fixed rider pay and transparent tiered commissions (Ujrah). One flat delivery fee at checkout.")
+	data.Faqs = faqs
+	data.JSONLD = faqJSONLD(faqs)
+	renderHTML(w, http.StatusOK, tplHome, "base", data)
 }
 
 func handlePrivacy(w http.ResponseWriter, r *http.Request) {
-	renderHTML(w, http.StatusOK, tplPrivacy, baseData(r,
+	renderHTML(w, http.StatusOK, tplPrivacy, "base", baseData(r,
 		"Privacy Policy — City Market",
 		"What City Market collects, why, who it is shared with, and your rights over your data."))
 }
 
 func handleTerms(w http.ResponseWriter, r *http.Request) {
-	renderHTML(w, http.StatusOK, tplTerms, baseData(r,
+	renderHTML(w, http.StatusOK, tplTerms, "base", baseData(r,
 		"Terms of Service — City Market",
 		"The rules of the City Market marketplace, including the Halal commitment and the refund policy."))
 }
