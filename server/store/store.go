@@ -299,3 +299,36 @@ func (s *Store) Products() ([]catalog.Product, error) {
 	}
 	return out, rows.Err()
 }
+
+// UpsertShop inserts or replaces one shop row (the admin console's write
+// path). The Seed* structs double as the upsert payloads — same shape.
+func (s *Store) UpsertShop(sh SeedShop) error {
+	if _, err := s.db.Exec(
+		`INSERT OR REPLACE INTO shops (id, name, lat, lng, active) VALUES (?, ?, ?, ?, ?)`,
+		sh.ID, sh.Name, sh.Lat, sh.Lng, boolInt(sh.Active)); err != nil {
+		return fmt.Errorf("store: upsert shop %s: %w", sh.ID, err)
+	}
+	return nil
+}
+
+// UpsertRider inserts or replaces one rider row.
+func (s *Store) UpsertRider(rd SeedRider) error {
+	if _, err := s.db.Exec(
+		`INSERT OR REPLACE INTO riders (id, name, lat, lng, available) VALUES (?, ?, ?, ?, ?)`,
+		rd.ID, rd.Name, rd.Lat, rd.Lng, boolInt(rd.Available)); err != nil {
+		return fmt.Errorf("store: upsert rider %s: %w", rd.ID, err)
+	}
+	return nil
+}
+
+// UpsertProduct inserts or replaces one catalog row. Callers must reload
+// the catalog snapshot (catalog.NewDB) for the change to go live.
+func (s *Store) UpsertProduct(p SeedProduct) error {
+	if _, err := s.db.Exec(
+		`INSERT OR REPLACE INTO products (id, name, category, brand, size, price_minor, image, shop_id)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		p.ID, p.Name, p.Category, p.Brand, p.Size, p.PriceMinor, p.Image, p.ShopID); err != nil {
+		return fmt.Errorf("store: upsert product %s: %w", p.ID, err)
+	}
+	return nil
+}
