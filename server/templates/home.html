@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{.Title}} — Halal delivery marketplace</title>
+  <meta name="description" content="City Market is a 100% Halal delivery marketplace: certified-Halal shops, fixed rider pay, transparent tiered shop commissions.">
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body class="bg-neutral-50 text-neutral-900 antialiased">
+  <header class="border-b border-neutral-200 bg-white">
+    <nav aria-label="Main navigation" class="mx-auto flex max-w-3xl items-center justify-between px-4 py-4">
+      <a href="/" class="text-lg font-bold text-halal-700">City Market</a>
+      <span class="text-sm text-neutral-500">Phase 1 foundation</span>
+    </nav>
+  </header>
+
+  <main class="mx-auto max-w-3xl px-4 py-10">
+    <article class="card">
+      <h1 class="text-3xl font-bold">{{.Tagline}}</h1>
+      <p class="mt-2 text-neutral-600">
+        Certified-Halal shops, fixed rider pay and transparent tiered shop
+        commissions (Ujrah) — never interest. This page is rendered by Go with
+        html/template and styled by one minified stylesheet; the full web
+        experience with HTMX, pretty URLs and structured data ships in Phase 2.
+      </p>
+    </article>
+
+    <section aria-label="Business rules" class="mt-6 grid gap-4">
+      <div class="card">
+        <h2 class="font-semibold">Shop commission (Ujrah)</h2>
+        <p class="mt-1 text-sm text-neutral-600">0–50 orders: 0% · 51–200: 5% · 201–500: 7% · 501+: 9% capped at 7000.</p>
+      </div>
+      <div class="card">
+        <h2 class="font-semibold">Rider payout</h2>
+        <p class="mt-1 text-sm text-neutral-600">60 per delivery + 15 per km. Fixed, auditable, settled weekly.</p>
+      </div>
+      <div class="card">
+        <h2 class="font-semibold">Customer fee</h2>
+        <p class="mt-1 text-sm text-neutral-600">One flat delivery fee at checkout. No surge, no hidden charges.</p>
+      </div>
+    </section>
+  </main>
+
+  <footer class="border-t border-neutral-200 bg-white">
+    <div class="mx-auto max-w-3xl px-4 py-6 text-sm text-neutral-500">
+      © {{.Year}} City Market · Privacy Policy and Terms of Service arrive with the Phase 2 web frontend.
+    </div>
+  </footer>
+</body>
+</html>

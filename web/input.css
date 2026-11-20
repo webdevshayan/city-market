@@ -1,0 +1,17 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Reusable component classes. Tailwind emits these only when they appear in
+   the scanned templates, so the final stylesheet stays minimal. */
+@layer components {
+  .card {
+    @apply rounded-lg bg-white p-4 shadow-sm;
+  }
+  .btn-primary {
+    @apply inline-flex items-center justify-center rounded-lg bg-halal-600 px-4 py-2 text-sm font-semibold text-white;
+  }
+  .btn-primary:hover {
+    @apply bg-halal-700;
+  }
+}
