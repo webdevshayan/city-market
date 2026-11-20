@@ -1,0 +1,15 @@
+{{define "grid"}}
+<section id="shop-grid" aria-label="Products" class="mt-6 grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-4">
+  {{if not .Products}}
+  <p class="col-span-full text-sm text-neutral-500">No products match these filters — try clearing one.</p>
+  {{end}}
+  {{range .Products}}
+  <article class="card flex flex-col gap-2">
+    <img src="{{.Image}}" alt="{{.Name}}" width="240" height="240" loading="lazy" class="w-full rounded-md">
+    <h3 class="text-sm font-semibold">{{.Name}}</h3>
+    <p class="font-bold text-halal-700">{{.PriceText}} <span class="text-xs font-normal text-neutral-500">{{.Size}}</span></p>
+    <button type="button" class="btn-primary mt-auto" data-product="{{.ID}}">Add to Cart</button>
+  </article>
+  {{end}}
+</section>
+{{end}}
