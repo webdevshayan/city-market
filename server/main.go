@@ -10,7 +10,9 @@
 package main
 
 import (
+	"crypto/rand"
 	"embed"
+	"encoding/hex"
 	"encoding/json"
 	"html/template"
 	"io/fs"
@@ -21,7 +23,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/webdevshayan/city-market/server/cart"
 	"github.com/webdevshayan/city-market/server/catalog"
+	"github.com/webdevshayan/city-market/server/csrf"
 	"github.com/webdevshayan/city-market/server/finance"
 )
 
@@ -34,24 +38,36 @@ func mustTpl(files ...string) *template.Template {
 	return template.Must(template.ParseFS(content, files...))
 }
 
+// pageTpl builds a full-page template set: every page shares the base layout
+// and the cart-count fragment rendered in its header.
+func pageTpl(files ...string) *template.Template {
+	return mustTpl(append([]string{"templates/base.html", "templates/partials/cart-count.html"}, files...)...)
+}
+
 var (
-	tplHome     = mustTpl("templates/base.html", "templates/home.html")
-	tplPrivacy  = mustTpl("templates/base.html", "templates/privacy.html")
-	tplTerms    = mustTpl("templates/base.html", "templates/terms.html")
-	tplShop     = mustTpl("templates/base.html", "templates/shop.html", "templates/partials/shop-main.html", "templates/partials/grid.html")
-	tplShopMain = mustTpl("templates/partials/shop-main.html", "templates/partials/grid.html")
-	tplGrid     = mustTpl("templates/partials/grid.html")
-	tplNotFound = mustTpl("templates/base.html", "templates/notfound.html")
+	tplHome      = pageTpl("templates/home.html")
+	tplPrivacy   = pageTpl("templates/privacy.html")
+	tplTerms     = pageTpl("templates/terms.html")
+	tplShop      = pageTpl("templates/shop.html", "templates/partials/shop-main.html", "templates/partials/grid.html")
+	tplShopMain  = mustTpl("templates/partials/shop-main.html", "templates/partials/grid.html")
+	tplGrid      = mustTpl("templates/partials/grid.html")
+	tplCartCount = mustTpl("templates/partials/cart-count.html")
+	tplNotFound  = pageTpl("templates/notfound.html")
 )
+
+// carts holds the ephemeral Phase 2 demo carts; the Turso-backed store
+// replaces it when the database phase lands.
+var carts = cart.NewStore()
 
 func main() {
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "3000"
 	}
+	csrf.SecureCookie = strings.HasPrefix(baseURL(), "https://")
 	addr := ":" + port
 	log.Printf("city-market server listening on %s", addr)
-	log.Fatal(http.ListenAndServe(addr, secureHeaders(newMux())))
+	log.Fatal(http.ListenAndServe(addr, secureHeaders(csrf.Middleware(sessionCookie(newMux())))))
 }
 
 func newMux() *http.ServeMux {
@@ -74,6 +90,7 @@ func newMux() *http.ServeMux {
 	mux.HandleFunc("GET /api/v1/finance/rider", handleRiderPayout)
 	mux.HandleFunc("GET /api/v1/finance/checkout-fee", handleCheckoutFee)
 	mux.HandleFunc("GET /api/v1/finance/simulate-month", handleSimulateMonth)
+	mux.HandleFunc("POST /cart/add", handleCartAdd)
 	// Catch-all: anything unmatched gets the branded 404. Go's mux routes the
 	// most specific pattern first, so this never shadows the routes above.
 	mux.HandleFunc("GET /", render404)
@@ -112,6 +129,8 @@ type PageData struct {
 	CatLinks      []FilterLink
 	BrandLinks    []FilterLink
 	SizeLinks     []FilterLink
+	CSRFToken     string // embedded into hx-headers for state-changing HTMX
+	CartCount     int    // items in the visitor's cart (header badge)
 }
 
 // baseData fills the fields every page shares.
@@ -123,6 +142,8 @@ func baseData(r *http.Request, title, description string) PageData {
 		BaseURL:     baseURL(),
 		Year:        time.Now().Year(),
 		OrgJSONLD:   orgJSONLD(baseURL()),
+		CSRFToken:   csrf.FromRequest(r),
+		CartCount:   int(carts.Count(sessionID(r))),
 	}
 }
 
@@ -320,6 +341,87 @@ func render404(w http.ResponseWriter, r *http.Request) {
 	renderHTML(w, http.StatusNotFound, tplNotFound, "base", baseData(r,
 		"Page not found — City Market",
 		"That page does not exist or has moved. Browse the Halal market instead."))
+}
+
+// sessionID returns the visitor's cart session id from its cookie ("" if none).
+func sessionID(r *http.Request) string {
+	c, err := r.Cookie("cm_sid")
+	if err != nil || c.Value == "" {
+		return ""
+	}
+	return c.Value
+}
+
+// randomHex returns n CSPRNG bytes hex-encoded, for session cookies.
+func randomHex(n int) string {
+	b := make([]byte, n)
+	if _, err := rand.Read(b); err != nil {
+		panic("entropy unavailable: " + err.Error()) // CSPRNG failure is unrecoverable
+	}
+	return hex.EncodeToString(b)
+}
+
+// secureCookies marks session cookies Secure when we serve https (the CSRF
+// cookie gets the same treatment via csrf.SecureCookie, set in main).
+var secureCookies = strings.HasPrefix(baseURL(), "https://")
+
+// sessionCookie ensures every visitor carries a cart session id cookie.
+func sessionCookie(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet || r.Method == http.MethodHead || r.Method == http.MethodOptions {
+			if sessionID(r) == "" {
+				http.SetCookie(w, &http.Cookie{
+					Name:     "cm_sid",
+					Value:    randomHex(16),
+					Path:     "/",
+					MaxAge:   86400 * 30,
+					HttpOnly: true,
+					SameSite: http.SameSiteStrictMode,
+					Secure:   secureCookies,
+				})
+			}
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// handleCartAdd adds a product to the visitor's cart. CSRF is validated by
+// the middleware before we get here — X-CSRF-Token from htmx's hx-headers,
+// or the _csrf form field as the no-JS fallback.
+func handleCartAdd(w http.ResponseWriter, r *http.Request) {
+	id := r.PostFormValue("product_id")
+	if id == "" {
+		writeErr(w, http.StatusBadRequest, "missing product_id")
+		return
+	}
+	if _, ok := catalog.ByID(id); !ok {
+		writeErr(w, http.StatusBadRequest, "unknown product")
+		return
+	}
+	sid := sessionID(r)
+	if sid == "" {
+		sid = randomHex(16)
+		http.SetCookie(w, &http.Cookie{
+			Name:     "cm_sid",
+			Value:    sid,
+			Path:     "/",
+			MaxAge:   86400 * 30,
+			HttpOnly: true,
+			SameSite: http.SameSiteStrictMode,
+			Secure:   secureCookies,
+		})
+	}
+	count, ok := carts.Add(sid, id)
+	if !ok {
+		writeErr(w, http.StatusServiceUnavailable, "cart capacity reached")
+		return
+	}
+	if r.Header.Get("HX-Request") == "true" {
+		renderHTML(w, http.StatusOK, tplCartCount, "cartCount", PageData{CartCount: int(count)})
+		return
+	}
+	// No-JS fallback: back to the shop, badge refreshed on the next render.
+	http.Redirect(w, r, "/shop", http.StatusSeeOther)
 }
 
 func handlePrivacy(w http.ResponseWriter, r *http.Request) {
