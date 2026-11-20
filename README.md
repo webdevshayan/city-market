@@ -21,10 +21,11 @@ covered by table-driven tests at every tier boundary.
 ## Layout
 
 ```
-apps/citizen   Flutter customer app (Phase 4)
-apps/shop      Flutter shop dashboard (Phase 4)
-apps/rider     Flutter rider app (Phase 4)
-apps/admin     Flutter admin console (Phase 4)
+apps/core      Shared Dart API client, models and test double for all apps
+apps/citizen   Flutter customer app — catalog, flat-fee checkout, order status
+apps/shop      Flutter shop dashboard — order queue, confirm step
+apps/rider     Flutter rider app — job list, pick-up/deliver, payouts
+apps/admin     Flutter admin console — shops, catalog, settlement view
 server         Go HTTP server — API + HTMX frontend, matching engine, Turso
 web            Tailwind build: scans Go templates, emits ONE minified stylesheet
 docs           Phase notes and decisions
@@ -58,10 +59,11 @@ directories. Set `BASE_URL` so canonical tags, Open Graph and the generated
 1. **Financial engine & scaffolding** — merged (PR #1).
 2. **Web frontend** — merged (PR #2): HTMX + pretty shareable URLs, legal
    pages, FAQ + JSON-LD, dynamic sitemap/robots, CSRF middleware.
-3. **Matching engine & Turso** — this phase: nearest shop/rider dispatch,
+3. **Matching engine & Turso** — merged (PR #3): nearest shop/rider dispatch,
    libSQL-backed catalog/carts/dispatch data behind small interfaces,
    per-IP rate limiting on the public API.
-4. **Flutter apps** — citizen, shop, rider, admin.
+4. **Flutter apps** — this phase: citizen, shop, rider, admin on a shared
+   API client, backed by the new orders/admin JSON API.
 
 Each phase lands as a pull request describing what changed, how it was
 tested, and what to verify before merging.

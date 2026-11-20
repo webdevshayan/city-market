@@ -62,12 +62,30 @@ jobs:
           retention-days: 1
           if-no-files-found: error
 
+  flutter:
+    name: Flutter — analyze + test core and the four apps
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: 3.24.5
+          cache: true
+      - name: Pub get, analyze, test — core and every app
+        run: |
+          for pkg in core citizen shop rider admin; do
+            echo "::group::$pkg"
+            (cd "apps/$pkg" && flutter pub get && flutter analyze && flutter test) || exit 1
+            echo "::endgroup::"
+          done
+
   # Storage policy: no permanent heavy files. Uploads live for 1 day
   # (retention-days: 1) and this job force-deletes anything older, so the
   # repository never accumulates heavy artifacts.
   cleanup:
     name: Storage cleanup — delete stale artifacts
-    needs: [server, web]
+    needs: [server, web, flutter]
     if: always()
     runs-on: ubuntu-latest
     permissions:
