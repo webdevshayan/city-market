@@ -1,0 +1,31 @@
+# --- Secrets & environment (never commit) ---
+.env
+.env.*
+*.token
+*.pem
+*.key
+
+# --- Dependencies ---
+node_modules/
+
+# --- Go build outputs ---
+server/bin/
+*.test
+
+# --- Flutter / Dart build outputs (added per-app when SDK work starts) ---
+apps/*/build/
+apps/*/.dart_tool/
+apps/*/ios/Pods/
+apps/*/.flutter-plugins*
+apps/*/.packages
+
+# server/static/styles.css IS committed on purpose (single minified stylesheet, no CDN).
+
+# --- Local agent workspace (not part of the product repo) ---
+download/
+upload/
+skills/
+
+# --- Misc ---
+*.log
+.DS_Store
