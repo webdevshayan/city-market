@@ -33,6 +33,7 @@ import (
 	"github.com/webdevshayan/city-market/server/csrf"
 	"github.com/webdevshayan/city-market/server/finance"
 	"github.com/webdevshayan/city-market/server/match"
+	"github.com/webdevshayan/city-market/server/orders"
 	"github.com/webdevshayan/city-market/server/ratelimit"
 	"github.com/webdevshayan/city-market/server/store"
 )
@@ -69,10 +70,11 @@ var (
 // tests and local runs work with zero configuration; main() switches to the
 // Turso-backed implementations when the env var is present.
 var (
-	cat     catalog.Provider = catalog.NewSeed()
-	carts   cart.Store       = cart.NewMemory()
-	places  placesSource     = seedPlaces{}
-	dbStore *store.Store
+	cat      catalog.Provider = catalog.NewSeed()
+	carts    cart.Store       = cart.NewMemory()
+	places   placesSource     = seedPlaces{}
+	orderSvc *orders.Service  // nil until DATABASE_URL is wired — orders are durable by nature
+	dbStore  *store.Store
 )
 
 // placesSource supplies dispatch candidates to the matching API. *store.Store
@@ -152,7 +154,8 @@ func wireDatabase() {
 	dbStore = st
 	carts = cart.NewDB(st.DB())
 	places = st
-	log.Printf("catalog, carts and dispatch data served from Turso")
+	orderSvc = orders.NewService(cat, places, st.DB())
+	log.Printf("catalog, carts, orders and dispatch data served from Turso")
 }
 
 func newMux() *http.ServeMux {
@@ -186,6 +189,8 @@ func newMuxWith(apiLimit, cartLimit func(http.Handler) http.Handler) *http.Serve
 	mux.Handle("GET /api/v1/finance/simulate-month", apiLimit(http.HandlerFunc(handleSimulateMonth)))
 	mux.Handle("GET /api/v1/match/shop", apiLimit(http.HandlerFunc(handleMatchShop)))
 	mux.Handle("GET /api/v1/match/rider", apiLimit(http.HandlerFunc(handleMatchRider)))
+	mux.Handle("POST /api/v1/orders", cartLimit(http.HandlerFunc(handlePlaceOrder)))
+	mux.Handle("GET /api/v1/orders/{id}", apiLimit(http.HandlerFunc(handleGetOrder)))
 	mux.HandleFunc("GET /sitemap.xml", handleSitemap)
 	mux.HandleFunc("GET /robots.txt", handleRobots)
 	mux.Handle("POST /cart/add", cartLimit(http.HandlerFunc(handleCartAdd)))
@@ -680,6 +685,75 @@ func handleMatchRider(w http.ResponseWriter, r *http.Request) {
 		"lng":             best.Pos.Lng,
 		"distance_meters": math.Round(dist),
 	})
+}
+
+// placeOrderBody is the citizen app's order request. Unknown fields are
+// rejected so silent client/server drift fails loudly instead of half-working.
+type placeOrderBody struct {
+	Items []struct {
+		ProductID string `json:"product_id"`
+		Qty       int64  `json:"qty"`
+	} `json:"items"`
+	Lat float64 `json:"lat"`
+	Lng float64 `json:"lng"`
+}
+
+// handlePlaceOrder is the citizen checkout: priced with the finance engine,
+// assigned shop + rider with the match engine, persisted in Turso. The cart
+// write bucket guards it too — both are state-changing citizen posts.
+func handlePlaceOrder(w http.ResponseWriter, r *http.Request) {
+	if orderSvc == nil {
+		writeErr(w, http.StatusServiceUnavailable, "orders require the database — set DATABASE_URL")
+		return
+	}
+	var body placeOrderBody
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&body); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid JSON body: "+err.Error())
+		return
+	}
+	items := make([]orders.Item, 0, len(body.Items))
+	for _, it := range body.Items {
+		items = append(items, orders.Item{ProductID: it.ProductID, Qty: it.Qty})
+	}
+	o, err := orderSvc.Place(orders.PlaceInput{Items: items, Lat: body.Lat, Lng: body.Lng})
+	switch {
+	case err == nil:
+	case errors.Is(err, orders.ErrEmptyOrder),
+		errors.Is(err, orders.ErrBadQty),
+		errors.Is(err, orders.ErrBadLocation),
+		errors.Is(err, orders.ErrUnknownProduct):
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	case errors.Is(err, orders.ErrMultiShop),
+		errors.Is(err, orders.ErrNoShopOpen),
+		errors.Is(err, orders.ErrNoRider):
+		writeErr(w, http.StatusConflict, err.Error())
+		return
+	default:
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusCreated, o)
+}
+
+// handleGetOrder serves one order by ID (IDs carry 96 random bits, so they
+// are unguessable and this stays unauthenticated in the demo).
+func handleGetOrder(w http.ResponseWriter, r *http.Request) {
+	if orderSvc == nil {
+		writeErr(w, http.StatusServiceUnavailable, "orders require the database — set DATABASE_URL")
+		return
+	}
+	o, err := orderSvc.ByID(r.PathValue("id"))
+	switch {
+	case err == nil:
+		writeJSON(w, http.StatusOK, o)
+	case errors.Is(err, orders.ErrUnknownOrder):
+		writeErr(w, http.StatusNotFound, err.Error())
+	default:
+		writeErr(w, http.StatusInternalServerError, err.Error())
+	}
 }
 
 func handlePrivacy(w http.ResponseWriter, r *http.Request) {
