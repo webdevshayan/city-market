@@ -39,10 +39,24 @@ const (
 	// spec fixes the fee as "flat" but does not state its amount; 25 is the
 	// launch default and is configurable without touching the engine.
 	DefaultDeliveryFeeMajor int64 = 25
+
+	// MaxSalesMinor bounds user-supplied monthly sales so the commission
+	// product salesMinor*rateBps can never overflow int64 even at the worst
+	// tier: 1e14 × 9000 bps = 9e17 < 2^63. Inputs above the ceiling are
+	// rejected, never clamped.
+	MaxSalesMinor int64 = 100_000_000_000_000 // 1e14 minor = 1 trillion major
+
+	// MaxDeliveries and MaxKm bound rider volume inputs; both keep every
+	// payout product far below 2^63 as well.
+	MaxDeliveries int64 = 1_000_000_000
+	MaxKm         int64 = 1_000_000_000
 )
 
 // ErrNegative is returned when an input amount or count is negative.
 var ErrNegative = errors.New("finance: negative input")
+
+// ErrOutOfBounds is returned when an input exceeds the documented ceiling.
+var ErrOutOfBounds = errors.New("finance: input exceeds maximum bound")
 
 // Tier is one commission bracket of the Ujrah schedule.
 type Tier struct {
@@ -79,6 +93,9 @@ func CommissionMinor(monthlyOrders, salesMinor int64) (commissionMinor, rateBps 
 	if monthlyOrders < 0 || salesMinor < 0 {
 		return 0, 0, false, ErrNegative
 	}
+	if salesMinor > MaxSalesMinor {
+		return 0, 0, false, ErrOutOfBounds
+	}
 	t, err := TierFor(monthlyOrders)
 	if err != nil {
 		return 0, 0, false, err
@@ -101,6 +118,9 @@ func CommissionMinor(monthlyOrders, salesMinor int64) (commissionMinor, rateBps 
 func RiderPayoutMinor(deliveries, km int64) (payoutMinor, baseMinor, distanceMinor int64, err error) {
 	if deliveries < 0 || km < 0 {
 		return 0, 0, 0, ErrNegative
+	}
+	if deliveries > MaxDeliveries || km > MaxKm {
+		return 0, 0, 0, ErrOutOfBounds
 	}
 	baseMinor = deliveries * RiderBasePerDeliveryMajor * MinorPerUnit
 	distanceMinor = km * RiderPerKmMajor * MinorPerUnit

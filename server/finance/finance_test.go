@@ -2,6 +2,7 @@ package finance
 
 import (
 	"errors"
+	"math"
 	"testing"
 )
 
@@ -146,5 +147,39 @@ func TestSimulateMonth(t *testing.T) {
 func TestSimulateMonthRejectsNegative(t *testing.T) {
 	if _, err := SimulateMonth(600, 20000000, -1, 0); !errors.Is(err, ErrNegative) {
 		t.Fatalf("want ErrNegative, got %v", err)
+	}
+}
+
+// Exploit-shaped tests from the PR review (C1): crafted inputs near MaxInt64
+// must be rejected, never wrapped into negative settlement amounts.
+func TestCommissionMinorRejectsOverflow(t *testing.T) {
+	if _, _, _, err := CommissionMinor(1000, math.MaxInt64); !errors.Is(err, ErrOutOfBounds) {
+		t.Fatalf("MaxInt64 sales: want ErrOutOfBounds, got %v", err)
+	}
+	if _, _, _, err := CommissionMinor(1000, MaxSalesMinor+1); !errors.Is(err, ErrOutOfBounds) {
+		t.Fatalf("above ceiling: want ErrOutOfBounds, got %v", err)
+	}
+	// The ceiling itself is accepted and yields a positive commission.
+	comm, _, _, err := CommissionMinor(1000, MaxSalesMinor)
+	if err != nil {
+		t.Fatalf("ceiling input rejected: %v", err)
+	}
+	if comm <= 0 {
+		t.Fatalf("ceiling commission = %d, want positive", comm)
+	}
+}
+
+func TestRiderPayoutMinorRejectsOverflow(t *testing.T) {
+	if _, _, _, err := RiderPayoutMinor(math.MaxInt64, 0); !errors.Is(err, ErrOutOfBounds) {
+		t.Fatalf("MaxInt64 deliveries: want ErrOutOfBounds, got %v", err)
+	}
+	if _, _, _, err := RiderPayoutMinor(0, MaxKm+1); !errors.Is(err, ErrOutOfBounds) {
+		t.Fatalf("above km ceiling: want ErrOutOfBounds, got %v", err)
+	}
+}
+
+func TestSimulateMonthRejectsOverflow(t *testing.T) {
+	if _, err := SimulateMonth(1000, MaxSalesMinor, MaxDeliveries+1, 0); !errors.Is(err, ErrOutOfBounds) {
+		t.Fatalf("want ErrOutOfBounds, got %v", err)
 	}
 }
