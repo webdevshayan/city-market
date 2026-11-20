@@ -1,8 +1,10 @@
 package main
 
 import (
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -32,5 +34,42 @@ func TestStaticFileStillServed(t *testing.T) {
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("GET /static/styles.css = %d, want 200", resp.StatusCode)
+	}
+}
+
+// Regression for the blank-page bug: a page set renders its "base" layout,
+// so every page must actually contain layout and page content.
+func TestPagesRenderFullLayout(t *testing.T) {
+	srv := httptest.NewServer(secureHeaders(newMux()))
+	defer srv.Close()
+
+	tests := []struct {
+		url  string
+		want string
+	}{
+		{"/", "Frequently Asked Questions"},
+		{"/", "Is the meat Halal?"},
+		{"/", "application/ld+json"},
+		{"/", "Privacy Policy"},
+		{"/privacy", "Who we are"},
+		{"/privacy", "Your rights"},
+		{"/terms", "Refund policy (Halal guarantee)"},
+	}
+	for _, tc := range tests {
+		resp, err := http.Get(srv.URL + tc.url)
+		if err != nil {
+			t.Fatalf("GET %s: %v", tc.url, err)
+		}
+		body, err := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if err != nil {
+			t.Fatalf("GET %s body: %v", tc.url, err)
+		}
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("GET %s = %d, want 200", tc.url, resp.StatusCode)
+		}
+		if !strings.Contains(string(body), tc.want) {
+			t.Fatalf("GET %s missing %q — layout or content not rendered", tc.url, tc.want)
+		}
 	}
 }
