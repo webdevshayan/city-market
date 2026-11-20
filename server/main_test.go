@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/cookiejar"
@@ -9,8 +10,14 @@ import (
 	"strings"
 	"testing"
 
+	// Registers the pure-Go sqlite driver so file::memory: DSNs work in the
+	// DB-backed API tests (libsql itself registers through the store package).
+	_ "modernc.org/sqlite"
+
 	"github.com/webdevshayan/city-market/server/csrf"
+	"github.com/webdevshayan/city-market/server/orders"
 	"github.com/webdevshayan/city-market/server/ratelimit"
+	"github.com/webdevshayan/city-market/server/store"
 )
 
 // Review finding M2: directory listings must be blocked; real files stay up.
@@ -408,5 +415,116 @@ func TestPublicAPIRateLimited(t *testing.T) {
 	}
 	if resp.Header.Get("Retry-After") == "" {
 		t.Fatal("429 must carry Retry-After")
+	}
+}
+
+// Without a database the citizen order API must say so honestly (503) —
+// never fabricate an order it cannot persist.
+func TestOrderPlacementAPINoDatabase(t *testing.T) {
+	srv := httptest.NewServer(secureHeaders(newMux()))
+	defer srv.Close()
+
+	resp, err := http.Post(srv.URL+"/api/v1/orders", "application/json",
+		strings.NewReader(`{"items":[{"product_id":"beef-1kg","qty":1}],"lat":24.86,"lng":67.0}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	io.Copy(io.Discard, resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("no-DB placement = %d, want 503", resp.StatusCode)
+	}
+}
+
+// With the database wired, the citizen flow works end to end over the API:
+// place (priced + assigned), re-read, and the error paths.
+func TestOrderPlacementAPIWithDatabase(t *testing.T) {
+	st, err := store.Open("file::memory:?cache=shared")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	if err := st.EnsureSchema(); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SeedIfEmpty(store.SeedShops(), store.SeedRiders(), store.SeedProducts()); err != nil {
+		t.Fatal(err)
+	}
+	orderSvc = orders.NewService(cat, places, st.DB())
+	t.Cleanup(func() { orderSvc = nil }) // tests run sequentially; restore the no-DB default
+
+	srv := httptest.NewServer(secureHeaders(newMux()))
+	defer srv.Close()
+
+	post := func(body string) (*http.Response, []byte) {
+		resp, err := http.Post(srv.URL+"/api/v1/orders", "application/json", strings.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		raw, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		return resp, raw
+	}
+
+	resp, raw := post(`{"items":[{"product_id":"beef-1kg","qty":2}],"lat":24.8607,"lng":67.0011}`)
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("place = %d, want 201; body %s", resp.StatusCode, raw)
+	}
+	var o orders.Order
+	if err := json.Unmarshal(raw, &o); err != nil {
+		t.Fatalf("decode order: %v", err)
+	}
+	if o.Status != orders.StatusPlaced || o.ShopID != "s-central" || o.RiderID != "r-1" {
+		t.Fatalf("order = %+v", o)
+	}
+	if o.TotalMinor != 282500 { // 2 × 1400.00 + the 25.00 flat delivery fee
+		t.Fatalf("total = %d, want 282500", o.TotalMinor)
+	}
+	if o.RiderPayoutMinor != 6000 { // shop at the customer's own coordinates: 0 km route
+		t.Fatalf("payout = %d, want 6000", o.RiderPayoutMinor)
+	}
+
+	resp2, err := http.Get(srv.URL + "/api/v1/orders/" + o.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw2, _ := io.ReadAll(resp2.Body)
+	resp2.Body.Close()
+	if resp2.StatusCode != http.StatusOK {
+		t.Fatalf("get order = %d, want 200", resp2.StatusCode)
+	}
+	var got orders.Order
+	if err := json.Unmarshal(raw2, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.ID != o.ID || got.TotalMinor != o.TotalMinor {
+		t.Fatal("re-read order must match")
+	}
+
+	cases := []struct {
+		name, body string
+		want       int
+	}{
+		{"unknown product", `{"items":[{"product_id":"nope","qty":1}],"lat":24.86,"lng":67}`, 400},
+		{"multi-shop cart", `{"items":[{"product_id":"beef-1kg","qty":1},{"product_id":"rice-5kg","qty":1}],"lat":24.86,"lng":67}`, 409},
+		{"empty items", `{"items":[],"lat":24.86,"lng":67}`, 400},
+		{"bad coordinates", `{"items":[{"product_id":"beef-1kg","qty":1}],"lat":999,"lng":67}`, 400},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			resp, raw := post(tc.body)
+			if resp.StatusCode != tc.want {
+				t.Fatalf("= %d, want %d; body %s", resp.StatusCode, tc.want, raw)
+			}
+		})
+	}
+
+	resp3, err := http.Get(srv.URL + "/api/v1/orders/ord-missing")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp3.Body.Close()
+	if resp3.StatusCode != http.StatusNotFound {
+		t.Fatalf("unknown order = %d, want 404", resp3.StatusCode)
 	}
 }
