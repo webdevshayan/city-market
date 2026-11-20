@@ -1,0 +1,26 @@
+{{define "shopMain"}}
+<div id="shop-main">
+  <h1 class="text-2xl font-bold sm:text-3xl">
+    Shop
+    {{if .CategoryLabel}} — {{.CategoryLabel}}{{end}}
+    {{if .BrandLabel}} · {{.BrandLabel}}{{end}}
+    {{if .SizeLabel}} · {{.SizeLabel}}{{end}}
+  </h1>
+
+  <nav aria-label="Categories" class="mt-4 flex flex-wrap gap-2">
+    {{range .CatLinks}}<a href="{{.URL}}" hx-get="{{.URL}}" hx-target="#shop-main" hx-swap="outerHTML" hx-push-url="true" class="chip {{if .Active}}chip-active{{end}}">{{.Name}}</a>{{end}}
+  </nav>
+  {{if .BrandLinks}}
+  <nav aria-label="Brands" class="mt-2 flex flex-wrap gap-2">
+    {{range .BrandLinks}}<a href="{{.URL}}" hx-get="{{.URL}}" hx-target="#shop-main" hx-swap="outerHTML" hx-push-url="true" class="chip {{if .Active}}chip-active{{end}}">{{.Name}}</a>{{end}}
+  </nav>
+  {{end}}
+  {{if .SizeLinks}}
+  <nav aria-label="Sizes" class="mt-2 flex flex-wrap gap-2">
+    {{range .SizeLinks}}<a href="{{.URL}}" hx-get="{{.URL}}" hx-target="#shop-main" hx-swap="outerHTML" hx-push-url="true" class="chip {{if .Active}}chip-active{{end}}">{{.Name}}</a>{{end}}
+  </nav>
+  {{end}}
+
+  {{template "grid" .}}
+</div>
+{{end}}
