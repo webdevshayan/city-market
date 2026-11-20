@@ -48,6 +48,12 @@ jobs:
           size=$(wc -c < server/static/styles.css)
           echo "styles.css bytes: ${size}"
           [ "${size}" -gt 500 ] || { echo "::error::styles.css is suspiciously small (${size} bytes)"; exit 1; }
+      - name: Fail on stylesheet drift (committed CSS must match templates)
+        run: |
+          if ! git diff --exit-code -- server/static/styles.css; then
+            echo "::error::server/static/styles.css is stale — run scripts/build-css.sh and commit the result"
+            exit 1
+          fi
       - name: Upload stylesheet (artifact, 1-day retention)
         uses: actions/upload-artifact@v4
         with:
