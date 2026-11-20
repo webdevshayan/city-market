@@ -24,6 +24,9 @@ Design decisions:
 - The 7000 cap is applied to the 9% tier (the literal reading of the spec:
   "500+: 9% capped at 7000 max"). If the cap is meant to be global, it is a
   one-line change in `CommissionMinor` plus a test.
+- User-supplied amounts are bounded (`finance.MaxSalesMinor` = 1e14 minor,
+  deliveries/km ≤ 1e9) so the settlement products can never overflow int64;
+  inputs above the ceilings are rejected with 400, never clamped.
 - The flat checkout fee's amount is not stated in the spec; 25 is the launch
   default, exposed via `finance.DefaultDeliveryFeeMajor` and the
   `/api/v1/finance/checkout-fee` endpoint so it can be changed centrally.
@@ -70,6 +73,20 @@ bash scripts/build-css.sh          # rebuild the stylesheet (needs Node 18+)
 cd server && go test ./... -v      # Halal math proofs
 cd server && go run .              # serves on :3000 (PORT env to change)
 ```
+
+## Review outcome (autonomous review on PR #1)
+
+Scored 8.4/10 before fixes, 9.6/10 after. Applied on this branch:
+
+- **C1 (critical):** unbounded `sales_minor`/`deliveries`/`km` could overflow
+  int64 and wrap settlement amounts negative → input ceilings + 400 +
+  exploit-shaped tests (`349a772`).
+- **M2:** `/static/` served directory listings → directories now 404, with a
+  regression test (`b9977f1`).
+- **M1:** stylesheet drift was invisible to CI → the web job now fails when
+  the committed CSS differs from a fresh regeneration.
+- Accepted notes: rate limiting lands with Phase 3; `Tiers` becomes an
+  immutable accessor when the admin console manages schedules.
 
 ## Next: Phase 2 — The Web Frontend
 
