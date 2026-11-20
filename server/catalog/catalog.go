@@ -5,6 +5,7 @@
 package catalog
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 )
@@ -54,58 +55,103 @@ func Seed() []Product {
 	return out
 }
 
-// Filter returns products matching every non-empty slug constraint.
-func Filter(category, brand, size string) []Product {
-	out := make([]Product, 0, len(seed))
-	for _, p := range seed {
-		if category != "" && p.Category != category {
-			continue
-		}
-		if brand != "" && p.Brand != brand {
-			continue
-		}
-		if size != "" && p.Size != size {
-			continue
-		}
-		out = append(out, p)
-	}
-	return out
+// Provider supplies the catalog. The seed provider backs development and the
+// no-database fallback; the DB provider snapshots Turso at boot. The shop
+// UI, sitemap and cart validation all go through this interface, so nothing
+// downstream cares which one is wired.
+type Provider interface {
+	All() []Product
+	ByID(id string) (Product, bool)
+	Filter(category, brand, size string) []Product
+	Categories() []string
+	Brands() []string
+	Sizes() []string
+	ValidFilter(category, brand, size string) bool
 }
 
-// ByID looks a product up by its ID; ok=false when unknown.
-func ByID(id string) (Product, bool) {
-	for _, p := range seed {
-		if p.ID == id {
-			return p, true
+// NewSeed returns the provider backed by the launch fixtures.
+func NewSeed() Provider { return &listProvider{products: seed} }
+
+// NewDB returns a provider that snapshots the database catalog at boot.
+// Live refresh without a restart arrives with the admin console (Phase 4).
+func NewDB(source interface {
+	Products() ([]Product, error)
+}) (Provider, error) {
+	products, err := source.Products()
+	if err != nil {
+		return nil, fmt.Errorf("catalog: load from database: %w", err)
+	}
+	if len(products) == 0 {
+		return nil, errors.New("catalog: database catalog is empty")
+	}
+	return &listProvider{products: products}, nil
+}
+
+// listProvider serves a catalog from an in-memory product list; both the
+// seed provider and the DB-backed snapshot use it.
+type listProvider struct{ products []Product }
+
+func (p *listProvider) All() []Product { return p.products }
+
+func (p *listProvider) ByID(id string) (Product, bool) {
+	for _, prod := range p.products {
+		if prod.ID == id {
+			return prod, true
 		}
 	}
 	return Product{}, false
 }
 
+// Filter returns products matching every non-empty slug constraint.
+func (p *listProvider) Filter(category, brand, size string) []Product {
+	out := make([]Product, 0, len(p.products))
+	for _, prod := range p.products {
+		if category != "" && prod.Category != category {
+			continue
+		}
+		if brand != "" && prod.Brand != brand {
+			continue
+		}
+		if size != "" && prod.Size != size {
+			continue
+		}
+		out = append(out, prod)
+	}
+	return out
+}
+
 // Categories, Brands and Sizes return the distinct vocabularies, in catalog
 // order — these are the only slugs valid in a pretty URL segment.
-func Categories() []string { return vocabOf(func(p Product) string { return p.Category }) }
-func Brands() []string     { return vocabOf(func(p Product) string { return p.Brand }) }
-func Sizes() []string      { return vocabOf(func(p Product) string { return p.Size }) }
+func (p *listProvider) Categories() []string {
+	return vocabOf(p.products, func(prod Product) string { return prod.Category })
+}
 
-func vocabOf(key func(Product) string) []string {
+func (p *listProvider) Brands() []string {
+	return vocabOf(p.products, func(prod Product) string { return prod.Brand })
+}
+
+func (p *listProvider) Sizes() []string {
+	return vocabOf(p.products, func(prod Product) string { return prod.Size })
+}
+
+// ValidFilter reports whether the slug triple uses only known vocabulary
+// (empty segment = unconstrained). Unknown segments 404 so search engines
+// never index filter combinations that cannot exist.
+func (p *listProvider) ValidFilter(category, brand, size string) bool {
+	return contains(p.Categories(), category) && contains(p.Brands(), brand) && contains(p.Sizes(), size)
+}
+
+func vocabOf(products []Product, key func(Product) string) []string {
 	seen := map[string]bool{}
 	var out []string
-	for _, p := range seed {
-		v := key(p)
+	for _, prod := range products {
+		v := key(prod)
 		if !seen[v] {
 			seen[v] = true
 			out = append(out, v)
 		}
 	}
 	return out
-}
-
-// ValidFilter reports whether the slug triple uses only known vocabulary
-// (empty segment = unconstrained). Unknown segments 404 so search engines
-// never index filter combinations that cannot exist.
-func ValidFilter(category, brand, size string) bool {
-	return contains(Categories(), category) && contains(Brands(), brand) && contains(Sizes(), size)
 }
 
 func contains(list []string, slug string) bool {

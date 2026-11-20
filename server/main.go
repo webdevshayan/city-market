@@ -30,6 +30,7 @@ import (
 	"github.com/webdevshayan/city-market/server/catalog"
 	"github.com/webdevshayan/city-market/server/csrf"
 	"github.com/webdevshayan/city-market/server/finance"
+	"github.com/webdevshayan/city-market/server/store"
 )
 
 //go:embed templates static
@@ -58,9 +59,16 @@ var (
 	tplNotFound  = pageTpl("templates/notfound.html")
 )
 
-// carts holds the ephemeral Phase 2 demo carts; the Turso-backed store
-// replaces it when the database phase lands.
-var carts = cart.NewStore()
+// cat is the active catalog provider and carts the cart backend; dbStore is
+// set when DATABASE_URL is wired. Defaults are in-memory (seed catalog,
+// memory carts) so tests and local runs work with zero configuration;
+// main() switches to the Turso-backed implementations when the env var is
+// present.
+var (
+	cat     catalog.Provider = catalog.NewSeed()
+	carts                    = cart.NewStore()
+	dbStore *store.Store
+)
 
 func main() {
 	port := os.Getenv("PORT")
@@ -68,9 +76,47 @@ func main() {
 		port = "3000"
 	}
 	csrf.SecureCookie = strings.HasPrefix(baseURL(), "https://")
+	wireDatabase()
 	addr := ":" + port
 	log.Printf("city-market server listening on %s", addr)
 	log.Fatal(http.ListenAndServe(addr, secureHeaders(csrf.Middleware(sessionCookie(newMux())))))
+}
+
+// wireDatabase switches the catalog to Turso when DATABASE_URL is set (carts
+// and dispatch sources follow in the next commits). A failure to reach the
+// database degrades to the seed fixtures with a loud log line — the site
+// stays up rather than dying on boot, and operations sees the warning.
+func wireDatabase() {
+	dsn := os.Getenv("DATABASE_URL")
+	if dsn == "" {
+		log.Printf("DATABASE_URL not set — serving seed fixtures")
+		return
+	}
+	st, err := store.Open(dsn)
+	if err != nil {
+		log.Printf("database open failed (%v) — serving seed fixtures", err)
+		return
+	}
+	fail := func(stage string, err error) {
+		_ = st.Close()
+		log.Printf("database %s failed (%v) — serving seed fixtures", stage, err)
+	}
+	if err := st.EnsureSchema(); err != nil {
+		fail("schema", err)
+		return
+	}
+	if err := st.SeedIfEmpty(store.SeedShops(), store.SeedRiders(), store.SeedProducts()); err != nil {
+		fail("seed", err)
+		return
+	}
+	p, err := catalog.NewDB(st)
+	if err != nil {
+		fail("catalog load", err)
+		return
+	}
+	cat = p
+	dbStore = st
+	log.Printf("catalog served from Turso")
 }
 
 func newMux() *http.ServeMux {
@@ -253,7 +299,7 @@ func handleShop(w http.ResponseWriter, r *http.Request) {
 	category := r.PathValue("category")
 	brand := r.PathValue("brand")
 	size := r.PathValue("size")
-	if !catalog.ValidFilter(category, brand, size) {
+	if !cat.ValidFilter(category, brand, size) {
 		if r.Header.Get("HX-Request") == "true" {
 			// htmx does not swap 4xx responses by default, so the grid stays
 			// as-is; direct loads of a hand-crafted bad URL still get the
@@ -269,22 +315,22 @@ func handleShop(w http.ResponseWriter, r *http.Request) {
 	data.CategoryLabel = catalog.Display(category)
 	data.BrandLabel = catalog.Display(brand)
 	data.SizeLabel = catalog.Display(size)
-	data.Products = catalog.Filter(category, brand, size)
+	data.Products = cat.Filter(category, brand, size)
 	data.JSONLD = itemListJSONLD(data.BaseURL, data.Products)
 
 	catLinks := []FilterLink{{Name: "All", URL: "/shop", Active: category == ""}}
-	for _, c := range catalog.Categories() {
+	for _, c := range cat.Categories() {
 		catLinks = append(catLinks, FilterLink{Name: catalog.Display(c), URL: "/shop/" + c, Active: c == category})
 	}
 	data.CatLinks = catLinks
 	if category != "" {
 		catBase := "/shop/" + category
-		for _, b := range catalog.Brands() {
+		for _, b := range cat.Brands() {
 			data.BrandLinks = append(data.BrandLinks, FilterLink{Name: catalog.Display(b), URL: catBase + "/" + b, Active: b == brand})
 		}
 		if brand != "" {
 			brandBase := catBase + "/" + brand
-			for _, s := range catalog.Sizes() {
+			for _, s := range cat.Sizes() {
 				data.SizeLinks = append(data.SizeLinks, FilterLink{Name: catalog.Display(s), URL: brandBase + "/" + s, Active: s == size})
 			}
 		}
@@ -399,7 +445,7 @@ func handleCartAdd(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "missing product_id")
 		return
 	}
-	if _, ok := catalog.ByID(id); !ok {
+	if _, ok := cat.ByID(id); !ok {
 		writeErr(w, http.StatusBadRequest, "unknown product")
 		return
 	}
@@ -445,17 +491,17 @@ type urlset struct {
 // empty filter pages.
 func sitemapPaths() []string {
 	paths := []string{"/", "/privacy", "/terms", "/shop"}
-	for _, c := range catalog.Categories() {
+	for _, c := range cat.Categories() {
 		catPath := "/shop/" + c
 		paths = append(paths, catPath)
-		for _, b := range catalog.Brands() {
-			if len(catalog.Filter(c, b, "")) == 0 {
+		for _, b := range cat.Brands() {
+			if len(cat.Filter(c, b, "")) == 0 {
 				continue
 			}
 			brandPath := catPath + "/" + b
 			paths = append(paths, brandPath)
-			for _, s := range catalog.Sizes() {
-				if len(catalog.Filter(c, b, s)) > 0 {
+			for _, s := range cat.Sizes() {
+				if len(cat.Filter(c, b, s)) > 0 {
 					paths = append(paths, brandPath+"/"+s)
 				}
 			}
