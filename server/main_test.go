@@ -73,3 +73,42 @@ func TestPagesRenderFullLayout(t *testing.T) {
 		}
 	}
 }
+
+// Pretty URLs are the only shareable filter surface (never ?query=).
+func TestShopPrettyURLs(t *testing.T) {
+	srv := httptest.NewServer(secureHeaders(newMux()))
+	defer srv.Close()
+
+	tests := []struct {
+		url    string
+		status int
+		want   string
+	}{
+		{"/shop", http.StatusOK, "Whole Chicken, cleaned"},
+		{"/shop/meat", http.StatusOK, "Mutton Leg Cuts"},
+		{"/shop/meat/madina", http.StatusOK, "Whole Chicken, cleaned"},
+		{"/shop/meat/madina/1kg", http.StatusOK, "Mutton Leg Cuts"},
+		{"/shop/grocery/al-safwa", http.StatusOK, "No products match"},
+		{"/shop/electronics", http.StatusNotFound, "Page not found"},
+		{"/shop/meat/madina/2kg", http.StatusNotFound, "Page not found"},
+		{"/shop", http.StatusOK, `"ItemList"`},
+		{"/shop", http.StatusOK, `"priceCurrency":"PKR"`},
+	}
+	for _, tc := range tests {
+		resp, err := http.Get(srv.URL + tc.url)
+		if err != nil {
+			t.Fatalf("GET %s: %v", tc.url, err)
+		}
+		body, err := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if err != nil {
+			t.Fatalf("GET %s body: %v", tc.url, err)
+		}
+		if resp.StatusCode != tc.status {
+			t.Fatalf("GET %s = %d, want %d", tc.url, resp.StatusCode, tc.status)
+		}
+		if !strings.Contains(string(body), tc.want) {
+			t.Fatalf("GET %s missing %q", tc.url, tc.want)
+		}
+	}
+}

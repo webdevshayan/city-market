@@ -14,4 +14,10 @@
   .btn-primary:hover {
     @apply bg-halal-700;
   }
+  .chip {
+    @apply rounded-full border border-neutral-200 bg-white px-3 py-1 text-sm text-neutral-600;
+  }
+  .chip-active {
+    @apply border-halal-600 bg-halal-600 text-white;
+  }
 }

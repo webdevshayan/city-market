@@ -21,6 +21,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/webdevshayan/city-market/server/catalog"
 	"github.com/webdevshayan/city-market/server/finance"
 )
 
@@ -34,9 +35,12 @@ func mustTpl(files ...string) *template.Template {
 }
 
 var (
-	tplHome    = mustTpl("templates/base.html", "templates/home.html")
-	tplPrivacy = mustTpl("templates/base.html", "templates/privacy.html")
-	tplTerms   = mustTpl("templates/base.html", "templates/terms.html")
+	tplHome     = mustTpl("templates/base.html", "templates/home.html")
+	tplPrivacy  = mustTpl("templates/base.html", "templates/privacy.html")
+	tplTerms    = mustTpl("templates/base.html", "templates/terms.html")
+	tplShop     = mustTpl("templates/base.html", "templates/shop.html", "templates/partials/grid.html")
+	tplGrid     = mustTpl("templates/partials/grid.html")
+	tplNotFound = mustTpl("templates/base.html", "templates/notfound.html")
 )
 
 func main() {
@@ -60,11 +64,18 @@ func newMux() *http.ServeMux {
 	mux.HandleFunc("GET /{$}", handleHome)
 	mux.HandleFunc("GET /privacy", handlePrivacy)
 	mux.HandleFunc("GET /terms", handleTerms)
+	mux.HandleFunc("GET /shop", handleShop)
+	mux.HandleFunc("GET /shop/{category}", handleShop)
+	mux.HandleFunc("GET /shop/{category}/{brand}", handleShop)
+	mux.HandleFunc("GET /shop/{category}/{brand}/{size}", handleShop)
 	mux.HandleFunc("GET /healthz", handleHealth)
 	mux.HandleFunc("GET /api/v1/finance/ujrah", handleUjrah)
 	mux.HandleFunc("GET /api/v1/finance/rider", handleRiderPayout)
 	mux.HandleFunc("GET /api/v1/finance/checkout-fee", handleCheckoutFee)
 	mux.HandleFunc("GET /api/v1/finance/simulate-month", handleSimulateMonth)
+	// Catch-all: anything unmatched gets the branded 404. Go's mux routes the
+	// most specific pattern first, so this never shadows the routes above.
+	mux.HandleFunc("GET /", render404)
 	return mux
 }
 
@@ -77,15 +88,29 @@ func baseURL() string {
 
 // PageData carries everything a page's template may need; each handler sets
 // only the fields relevant to it.
+// FilterLink is one filter chip; Active highlights the current selection.
+type FilterLink struct {
+	Name   string
+	URL    string
+	Active bool
+}
+
 type PageData struct {
-	Title       string
-	Description string
-	Path        string // request path; used for canonical + og:url
-	BaseURL     string
-	Year        int
-	Faqs        []FaqItem   // home page FAQ section
-	OrgJSONLD   template.JS // Organization node, emitted on every page
-	JSONLD      template.JS // page-specific node (FAQPage, ItemList, …)
+	Title         string
+	Description   string
+	Path          string // request path; used for canonical + og:url
+	BaseURL       string
+	Year          int
+	Faqs          []FaqItem   // home page FAQ section
+	OrgJSONLD     template.JS // Organization node, emitted on every page
+	JSONLD        template.JS // page-specific node (FAQPage, ItemList, …)
+	Products      []catalog.Product
+	CategoryLabel string // display labels of the active filters ("" = none)
+	BrandLabel    string
+	SizeLabel     string
+	CatLinks      []FilterLink
+	BrandLinks    []FilterLink
+	SizeLinks     []FilterLink
 }
 
 // baseData fills the fields every page shares.
@@ -191,6 +216,95 @@ func handleHome(w http.ResponseWriter, r *http.Request) {
 	data.Faqs = faqs
 	data.JSONLD = faqJSONLD(faqs)
 	renderHTML(w, http.StatusOK, tplHome, "base", data)
+}
+
+// handleShop serves the product grid at pretty, shareable filter URLs:
+// /shop, /shop/{category}, /shop/{category}/{brand}, /shop/{category}/{brand}/{size}.
+// Unknown vocabulary 404s so engines never index impossible filter pages;
+// valid-but-empty combinations render a friendly empty grid.
+func handleShop(w http.ResponseWriter, r *http.Request) {
+	category := r.PathValue("category")
+	brand := r.PathValue("brand")
+	size := r.PathValue("size")
+	if !catalog.ValidFilter(category, brand, size) {
+		render404(w, r)
+		return
+	}
+	data := baseData(r, shopTitle(category, brand, size),
+		"Certified-Halal products with transparent prices. Product-first listings: image, name, price, add to cart.")
+	data.CategoryLabel = catalog.Display(category)
+	data.BrandLabel = catalog.Display(brand)
+	data.SizeLabel = catalog.Display(size)
+	data.Products = catalog.Filter(category, brand, size)
+	data.JSONLD = itemListJSONLD(data.BaseURL, data.Products)
+
+	catLinks := []FilterLink{{Name: "All", URL: "/shop", Active: category == ""}}
+	for _, c := range catalog.Categories() {
+		catLinks = append(catLinks, FilterLink{Name: catalog.Display(c), URL: "/shop/" + c, Active: c == category})
+	}
+	data.CatLinks = catLinks
+	if category != "" {
+		catBase := "/shop/" + category
+		for _, b := range catalog.Brands() {
+			data.BrandLinks = append(data.BrandLinks, FilterLink{Name: catalog.Display(b), URL: catBase + "/" + b, Active: b == brand})
+		}
+		if brand != "" {
+			brandBase := catBase + "/" + brand
+			for _, s := range catalog.Sizes() {
+				data.SizeLinks = append(data.SizeLinks, FilterLink{Name: catalog.Display(s), URL: brandBase + "/" + s, Active: s == size})
+			}
+		}
+	}
+	renderHTML(w, http.StatusOK, tplShop, "base", data)
+}
+
+func shopTitle(category, brand, size string) string {
+	var parts []string
+	for _, d := range []string{catalog.Display(category), catalog.Display(brand), catalog.Display(size)} {
+		if d != "" {
+			parts = append(parts, d)
+		}
+	}
+	if len(parts) == 0 {
+		return "Shop — City Market"
+	}
+	return strings.Join(parts, " · ") + " — City Market"
+}
+
+// itemListJSONLD renders the ItemList of Products (price + availability) for
+// answer engines on shop pages.
+func itemListJSONLD(base string, products []catalog.Product) template.JS {
+	elems := make([]map[string]any, len(products))
+	for i, p := range products {
+		elems[i] = map[string]any{
+			"@type":    "ListItem",
+			"position": i + 1,
+			"item": map[string]any{
+				"@type": "Product",
+				"name":  p.Name,
+				"image": base + p.Image,
+				"offers": map[string]any{
+					"@type":         "Offer",
+					"price":         p.PriceText(),
+					"priceCurrency": catalog.CurrencyCode,
+					"availability":  "https://schema.org/InStock",
+				},
+			},
+		}
+	}
+	b, _ := json.Marshal(map[string]any{
+		"@context":        "https://schema.org",
+		"@type":           "ItemList",
+		"name":            "City Market products",
+		"itemListElement": elems,
+	})
+	return template.JS(b)
+}
+
+func render404(w http.ResponseWriter, r *http.Request) {
+	renderHTML(w, http.StatusNotFound, tplNotFound, "base", baseData(r,
+		"Page not found — City Market",
+		"That page does not exist or has moved. Browse the Halal market instead."))
 }
 
 func handlePrivacy(w http.ResponseWriter, r *http.Request) {
