@@ -18,6 +18,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/webdevshayan/city-market/server/finance"
@@ -45,7 +46,7 @@ func newMux() *http.ServeMux {
 	}
 
 	mux := http.NewServeMux()
-	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServer(http.FS(staticRoot))))
+	mux.Handle("GET /static/", http.StripPrefix("/static/", noDirectoryListing(http.FileServer(http.FS(staticRoot)))))
 	mux.HandleFunc("GET /{$}", handleHome)
 	mux.HandleFunc("GET /healthz", handleHealth)
 	mux.HandleFunc("GET /api/v1/finance/ujrah", handleUjrah)
@@ -66,6 +67,18 @@ func secureHeaders(next http.Handler) http.Handler {
 		h.Set("X-Frame-Options", "DENY")
 		h.Set("Referrer-Policy", "strict-origin-when-cross-origin")
 		h.Set("Permissions-Policy", "geolocation=(self), camera=(), microphone=()")
+		next.ServeHTTP(w, r)
+	})
+}
+
+// noDirectoryListing blocks index rendering for directory paths so only real
+// files under /static/ are ever served (review finding M2).
+func noDirectoryListing(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "" || strings.HasSuffix(r.URL.Path, "/") {
+			http.NotFound(w, r)
+			return
+		}
 		next.ServeHTTP(w, r)
 	})
 }
@@ -153,12 +166,12 @@ func handleRiderPayout(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"deliveries":      deliveries,
-		"km":              km,
-		"base_minor":      baseMinor,
-		"distance_minor":  distanceMinor,
-		"payout_minor":    payoutMinor,
-		"payout_major":    payoutMinor / finance.MinorPerUnit,
+		"deliveries":     deliveries,
+		"km":             km,
+		"base_minor":     baseMinor,
+		"distance_minor": distanceMinor,
+		"payout_minor":   payoutMinor,
+		"payout_major":   payoutMinor / finance.MinorPerUnit,
 	})
 }
 
