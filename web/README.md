@@ -52,8 +52,10 @@ Cookies become `Secure` automatically when `WEB_BASE_URL` starts with
 
 ## Deploy
 
-Create a second Vercel project with **Root Directory = `web`** (the server
-keeps its own project rooted at `server/`). Framework preset: Go.
+Automatic: every green push to `main` deploys this app to Vercel
+production from CI (alongside the API project — see `../docs/DEPLOY.md`
+for the one-time setup: two Vercel projects, four GitHub secrets). Manual
+fallback, if you ever need it:
 
 ```bash
 cd web && vercel link && vercel env add API_BASE_URL && vercel --prod

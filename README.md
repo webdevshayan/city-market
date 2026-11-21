@@ -65,6 +65,10 @@ constant-time compare; `/static/` never lists directories. On the web app,
 `WEB_BASE_URL` drives canonical tags and the generated `/sitemap.xml` (and
 makes cookies `Secure`); `CART_SECRET` signs cart cookies.
 
+Deploys: the CI pipeline runs on `main` only — the four test jobs gate the
+`deploy-server` and `deploy-web` jobs that publish both Vercel projects to
+production. One-time setup (two projects, four secrets): `docs/DEPLOY.md`.
+
 ## Install the apps
 
 The four Flutter apps ship as signed APKs on the
