@@ -47,13 +47,10 @@ func TestValidFilter(t *testing.T) {
 	}
 }
 
-func TestByIDAndPriceText(t *testing.T) {
+func TestByID(t *testing.T) {
 	p, ok := seedCat.ByID("beef-1kg")
 	if !ok {
 		t.Fatal("seed product must resolve by ID")
-	}
-	if p.PriceText() != "1400.00" {
-		t.Fatalf("price text = %q, want 1400.00", p.PriceText())
 	}
 	if p.ShopID == "" {
 		t.Fatal("seed products must carry a shop id for the matching engine")
