@@ -86,12 +86,6 @@ CREATE TABLE IF NOT EXISTS products (
 	image       TEXT NOT NULL,
 	shop_id     TEXT NOT NULL
 );
-CREATE TABLE IF NOT EXISTS cart_items (
-	session_id TEXT NOT NULL,
-	product_id TEXT NOT NULL,
-	qty        INTEGER NOT NULL,
-	PRIMARY KEY (session_id, product_id)
-);
 CREATE TABLE IF NOT EXISTS orders (
 	id                TEXT PRIMARY KEY,
 	status            TEXT NOT NULL,

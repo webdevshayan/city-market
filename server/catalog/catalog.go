@@ -1,7 +1,7 @@
-// Package catalog supplies the product listing behind the shop. The seed
-// implementation is a clearly-marked fixture set so the pretty-URL shop UI
-// can be built and tested before the Turso-backed provider lands with the
-// database phase; it implements the same surface the DB provider will use.
+// Package catalog supplies the product listing behind the API. The seed
+// implementation is a clearly-marked fixture set so development and tests
+// run with zero configuration; it implements the same surface the
+// Turso-backed provider uses.
 package catalog
 
 import (
@@ -9,11 +9,6 @@ import (
 	"fmt"
 	"strings"
 )
-
-// CurrencyCode is the ISO code used in structured-data offers. The product
-// spec does not name a currency; PKR is the launch-market assumption and this
-// is the single place to change it.
-const CurrencyCode = "PKR"
 
 // Product is one listing. Category/Brand/Size hold URL slugs (not display
 // names) so shareable pretty URLs map 1:1 onto filters; ShopID ties the
@@ -27,11 +22,6 @@ type Product struct {
 	PriceMinor int64  `json:"price_minor"`
 	Image      string `json:"image"` // path under /static/img/
 	ShopID     string `json:"shop_id"`
-}
-
-// PriceText renders the price as "major.minor" for display.
-func (p Product) PriceText() string {
-	return fmt.Sprintf("%d.%02d", p.PriceMinor/100, p.PriceMinor%100)
 }
 
 // seed is the fixture catalog until Turso backs it. ShopID values reference
