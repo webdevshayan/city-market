@@ -54,6 +54,14 @@ middleware with a constant-time token compare; `/static/` never lists
 directories. Set `BASE_URL` so canonical tags, Open Graph and the generated
 `/sitemap.xml` carry the production domain.
 
+## Install the apps
+
+The four Flutter apps ship as signed APKs on the
+[Releases page](https://github.com/webdevshayan/city-market/releases) — one
+versioned bundle per change to `main`, built automatically
+(`docs/RELEASES.md` covers versioning, signing and the one-time release-key
+setup).
+
 ## Phases
 
 1. **Financial engine & scaffolding** — merged (PR #1).
@@ -62,8 +70,10 @@ directories. Set `BASE_URL` so canonical tags, Open Graph and the generated
 3. **Matching engine & Turso** — merged (PR #3): nearest shop/rider dispatch,
    libSQL-backed catalog/carts/dispatch data behind small interfaces,
    per-IP rate limiting on the public API.
-4. **Flutter apps** — this phase: citizen, shop, rider, admin on a shared
-   API client, backed by the new orders/admin JSON API.
+4. **Flutter apps** — merged (PR #4): citizen, shop, rider, admin on a
+   shared API client, backed by the new orders/admin JSON API.
+5. **APK releases** — this phase: every change to `main` ships all four
+   apps as a versioned GitHub Release (`docs/RELEASES.md`).
 
 Each phase lands as a pull request describing what changed, how it was
 tested, and what to verify before merging.
