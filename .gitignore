@@ -34,3 +34,9 @@ skills/
 
 # --- Flutter ---
 apps/*/build/
+
+# --- Android release signing (lives in Actions secrets, never in git) ---
+*.p12
+*.jks
+apps/*/android/keystore.properties
+apps/*/android/app/release-keystore.p12
