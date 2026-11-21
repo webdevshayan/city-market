@@ -25,6 +25,8 @@ apps/*/.packages
 download/
 upload/
 skills/
+.tools/
+.secrets/
 
 # --- Misc ---
 *.log
