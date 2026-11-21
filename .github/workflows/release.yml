@@ -1,0 +1,161 @@
+name: Release APKs
+
+# One release per change to main: the workflow builds all four Flutter apps
+# and publishes them as GitHub Release v0.4.<run_number>.
+#
+# NOTE: there is deliberately NO tag trigger. The release step below CREATES
+# a tag (v0.4.<run_number>) — a tag trigger would re-run this workflow on its
+# own tag pushes and loop forever.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write # create the release and upload APK assets
+
+concurrency:
+  group: release-main
+  cancel-in-progress: false # never kill a release build halfway
+
+jobs:
+  apk:
+    name: Build + publish APK bundle
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # full history + tags for the release notes
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: 3.24.5
+          cache: true
+
+      - name: Cache Gradle (wrapper + dependencies, shared by all four apps)
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('apps/*/android/**/gradle-wrapper.properties', 'apps/*/android/**/build.gradle', 'apps/*/pubspec.yaml') }}
+          restore-keys: gradle-${{ runner.os }}-
+
+      - name: Restore release keystore (falls back to debug key when absent)
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+          KEYSTORE_PASS: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASS: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          if [ -n "$KEYSTORE_B64" ]; then
+            printf '%s' "$KEYSTORE_B64" | base64 -d > /tmp/release-keystore.p12
+            for app in citizen shop rider admin; do
+              cp /tmp/release-keystore.p12 "apps/$app/android/app/release-keystore.p12"
+              {
+                printf 'storeFile=release-keystore.p12\n'
+                printf 'storeType=PKCS12\n'
+                printf 'storePassword=%s\n' "$KEYSTORE_PASS"
+                printf 'keyAlias=%s\n' "$KEY_ALIAS"
+                printf 'keyPassword=%s\n' "$KEY_PASS"
+              } > "apps/$app/android/keystore.properties"
+            done
+            echo "release keystore restored — APKs will be signed with the project release key"
+          else
+            echo "::warning::ANDROID_KEYSTORE_* secrets are not set — this release ships debug-signed; users will need to reinstall on updates"
+          fi
+
+      - name: Build the four release APKs (one versioned bundle per change)
+        run: |
+          VER="0.4.${GITHUB_RUN_NUMBER}"
+          echo "version: $VER  build: ${GITHUB_RUN_NUMBER}"
+          for app in citizen shop rider admin; do
+            echo "::group::build $app"
+            (cd "apps/$app" \
+              && flutter pub get \
+              && flutter build apk --release \
+                   --build-name="$VER" --build-number="${GITHUB_RUN_NUMBER}") \
+              || exit 1
+            echo "::endgroup::"
+          done
+
+      - name: Collect APKs into dist/
+        run: |
+          mkdir -p dist
+          for app in citizen shop rider admin; do
+            cp "apps/$app/build/app/outputs/flutter-apk/app-release.apk" \
+               "dist/${app}-v0.4.${GITHUB_RUN_NUMBER}.apk"
+          done
+          ls -la dist
+          for f in dist/*.apk; do
+            test "$(stat -c%s "$f")" -gt 1000000 || { echo "::error::$f is suspiciously small"; exit 1; }
+          done
+
+      - name: Write release notes
+        run: |
+          {
+            echo "## City Market APK bundle v0.4.${GITHUB_RUN_NUMBER}"
+            echo
+            echo "Built from commit ${GITHUB_SHA::7} — every change to \`main\` ships a fresh bundle."
+            echo
+            echo "| APK | app |"
+            echo "| --- | --- |"
+            echo "| \`citizen-v0.4.${GITHUB_RUN_NUMBER}.apk\` | shopper app (browse, order, track) |"
+            echo "| \`shop-v0.4.${GITHUB_RUN_NUMBER}.apk\` | shop console (orders, confirm) |"
+            echo "| \`rider-v0.4.${GITHUB_RUN_NUMBER}.apk\` | rider app (deliveries, payouts) |"
+            echo "| \`admin-v0.4.${GITHUB_RUN_NUMBER}.apk\` | admin console (shops, catalog, Ujrah) |"
+            echo
+            echo "### Changes in this release"
+            PREV_TAG=$(git describe --tags --abbrev=0 "${GITHUB_SHA}" 2>/dev/null || true)
+            if [ -n "$PREV_TAG" ]; then
+              git log --oneline "${PREV_TAG}..${GITHUB_SHA}" | sed 's/^/- /'
+            else
+              echo "- initial APK release"
+            fi
+            echo
+            echo "### Install"
+            echo "- Requires Android 5.0+ (minSdk 21). Side-load: tap the APK, allow \"install unknown apps\" once."
+            echo "- API base is baked at build time (\`API_BASE_URL\`, currently the local dev default)."
+            if [ -f apps/citizen/android/app/release-keystore.p12 ]; then
+              FPR=$(keytool -list -storetype PKCS12 \
+                    -keystore apps/citizen/android/app/release-keystore.p12 \
+                    -storepass "${{ secrets.ANDROID_KEYSTORE_PASSWORD }}" 2>/dev/null \
+                    | grep 'SHA256:' | head -1 | sed 's/^ *//')
+              echo
+              echo "### Signature"
+              echo "- Signed with the City Market release key. Certificate SHA-256: \`${FPR}\`"
+              echo "- Updates install in place over previous releases."
+            else
+              echo
+              echo "### Signature"
+              echo "- Debug-signed (ephemeral CI key) — uninstall the old build before installing an update."
+              echo "- The project release key activates automatically once \`ANDROID_KEYSTORE_*\` secrets are set."
+            fi
+          } > notes.md
+          cat notes.md
+
+      - name: Upload APK bundle (artifact, 1-day retention)
+        uses: actions/upload-artifact@v4
+        with:
+          name: apk-v0.4.${{ github.run_number }}
+          path: dist/*.apk
+          retention-days: 1
+          if-no-files-found: error
+
+      - name: Publish GitHub Release v0.4.<run_number>
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="v0.4.${GITHUB_RUN_NUMBER}"
+          gh release create "$TAG" dist/*.apk \
+            --title "City Market APK bundle v0.4.${GITHUB_RUN_NUMBER}" \
+            --notes-file notes.md \
+            --target "$GITHUB_SHA" \
+          || gh release upload "$TAG" dist/*.apk --clobber
+          gh release view "$TAG" --json assets --jq '.assets[].name'
