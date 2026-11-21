@@ -26,33 +26,44 @@ apps/citizen   Flutter customer app — catalog, flat-fee checkout, order status
 apps/shop      Flutter shop dashboard — order queue, confirm step
 apps/rider     Flutter rider app — job list, pick-up/deliver, payouts
 apps/admin     Flutter admin console — shops, catalog, settlement view
-server         Go HTTP server — API + HTMX frontend, matching engine, Turso
-web            Tailwind build: scans Go templates, emits ONE minified stylesheet
+server         Go API server — JSON API (catalog, dispatch, finance, orders, admin) over Turso
+web            Standalone public web app — own Go module + own domain, Vercel-deployed
 docs           Phase notes and decisions
-scripts        build tooling (stylesheet build)
+scripts        build tooling (stylesheet build, split smoke test)
 ```
 
-## Server
+## Server & web app
 
-Plain `net/http` — the same binary runs locally and on Vercel's Go runtime
-(`server/vercel.json` sets the Go framework preset; the server listens on
-`PORT`). Templates and static assets are embedded, so the stylesheet and
-HTML ship inside the binary.
+Two deployments, two domains:
 
+**`server/`** — the API. Plain `net/http` (the same binary runs locally and
+on Vercel's Go runtime; `server/vercel.json` sets the Go framework preset;
+it listens on `PORT`). JSON in, JSON out: catalog, dispatch matching,
+finance, orders, admin — `GET /` returns a JSON endpoint index, unknown
+paths get JSON 404s. The server serves no HTML.
+
+**`web/`** — the public web app on its own Go module and domain. It fetches
+the catalog server-side from the API and renders the storefront (home with
+FAQ + JSON-LD, pretty-URL shop, legal pages, sitemap/robots); the visitor
+cart is one HMAC-signed cookie, so the app is stateless and
+serverless-safe. See `web/README.md` for env vars and deploy steps.
+
+```bash
+bash scripts/build-css.sh            # rebuild web/site/static/styles.css (Node 18+)
+cd server && go test ./...           # API: finance, match, orders, admin
+cd web    && go test ./...           # web app: pages, cart, csrf, catalog source
+cd server && PORT=8080 go run .      # API on :8080
+cd web    && API_BASE_URL=http://localhost:8080 go run ./cmd/devserver   # site on :3000
+bash scripts/smoke-split.sh          # two-process proof of the decoupling
 ```
-bash scripts/build-css.sh       # rebuild server/static/styles.css (Node 18+)
-cd server && go test ./... -v   # financial engine proofs
-cd server && go run .           # serve on :3000
-```
 
-Security: every response carries a strict `Content-Security-Policy` with no
-inline-script allowance plus `X-Content-Type-Options`, `X-Frame-Options`,
-`Referrer-Policy` and `Permissions-Policy` headers; HTML is rendered
-exclusively through Go's context-aware `html/template`; state-changing
-requests (like the htmx cart) are protected by double-submit-cookie CSRF
-middleware with a constant-time token compare; `/static/` never lists
-directories. Set `BASE_URL` so canonical tags, Open Graph and the generated
-`/sitemap.xml` carry the production domain.
+Security (both apps): strict CSP with no inline-script allowance plus
+`X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy` and
+`Permissions-Policy` headers; HTML through context-aware `html/template`;
+state-changing requests protected by double-submit-cookie CSRF with a
+constant-time compare; `/static/` never lists directories. On the web app,
+`WEB_BASE_URL` drives canonical tags and the generated `/sitemap.xml` (and
+makes cookies `Secure`); `CART_SECRET` signs cart cookies.
 
 ## Install the apps
 
@@ -71,9 +82,13 @@ setup).
    libSQL-backed catalog/carts/dispatch data behind small interfaces,
    per-IP rate limiting on the public API.
 4. **Flutter apps** — merged (PR #4): citizen, shop, rider, admin on a
-   shared API client, backed by the new orders/admin JSON API.
-5. **APK releases** — this phase: every change to `main` ships all four
+   shared API client, backed by the orders/admin JSON API.
+5. **APK releases** — merged: every change to `main` ships all four
    apps as a versioned GitHub Release (`docs/RELEASES.md`).
+6. **The split** — this phase: the public web moves to a standalone Go
+   project in `web/` (own module, own Vercel project and domain), reading
+   the catalog from the API; the server becomes API-only, and the cart/CSRF
+   plumbing moves into the web module as a signed-cookie cart.
 
 Each phase lands as a pull request describing what changed, how it was
 tested, and what to verify before merging.

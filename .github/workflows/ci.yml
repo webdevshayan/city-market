@@ -42,25 +42,41 @@ jobs:
         run: |
           cd web
           npm ci
-          npx tailwindcss -c tailwind.config.js -i input.css -o ../server/static/styles.css --minify
+          npx tailwindcss -c tailwind.config.js -i input.css -o site/static/styles.css --minify
       - name: Fail if the stylesheet is missing or trivially small
         run: |
-          size=$(wc -c < server/static/styles.css)
+          size=$(wc -c < web/site/static/styles.css)
           echo "styles.css bytes: ${size}"
           [ "${size}" -gt 500 ] || { echo "::error::styles.css is suspiciously small (${size} bytes)"; exit 1; }
       - name: Fail on stylesheet drift (committed CSS must match templates)
         run: |
-          if ! git diff --exit-code -- server/static/styles.css; then
-            echo "::error::server/static/styles.css is stale — run scripts/build-css.sh and commit the result"
+          if ! git diff --exit-code -- web/site/static/styles.css; then
+            echo "::error::web/site/static/styles.css is stale — run scripts/build-css.sh and commit the result"
             exit 1
           fi
       - name: Upload stylesheet (artifact, 1-day retention)
         uses: actions/upload-artifact@v4
         with:
           name: styles-css
-          path: server/static/styles.css
+          path: web/site/static/styles.css
           retention-days: 1
           if-no-files-found: error
+
+  webapp:
+    name: Web app — vet, test (standalone Go module)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: web/go.mod
+      - name: Vet
+        run: go vet ./...
+      - name: Test
+        run: go test ./...
 
   flutter:
     name: Flutter — analyze + test core and the four apps
@@ -85,7 +101,7 @@ jobs:
   # repository never accumulates heavy artifacts.
   cleanup:
     name: Storage cleanup — delete stale artifacts
-    needs: [server, web, flutter]
+    needs: [server, web, webapp, flutter]
     if: always()
     runs-on: ubuntu-latest
     permissions:

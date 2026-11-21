@@ -1,10 +1,10 @@
 /** Tailwind scans ONLY our own Go templates and Go source files.
- *  Output is one minified CSS file committed at server/static/styles.css
- *  and served by the Go server — no CDN, no external stylesheet. */
+ *  Output is one minified CSS file committed at site/static/styles.css
+ *  and served by the web app — no CDN, no external stylesheet. */
 module.exports = {
   content: [
-    "../server/templates/**/*.html",
-    "../server/**/*.go",
+    "site/templates/**/*.html",
+    "site/**/*.go",
   ],
   theme: {
     extend: {
