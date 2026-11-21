@@ -1,10 +1,17 @@
 name: CI
 
+# Production discipline: every run happens on main only — tests gate the
+# Vercel production deploys, and production never takes code from anywhere
+# else. Pull requests get no runs by design. workflow_dispatch exists so a
+# run can be retried manually (e.g. redeploy after fixing a Vercel hiccup).
 on:
   push:
     branches: [main]
-  pull_request:
-    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
 
 permissions:
   contents: read
@@ -97,6 +104,62 @@ jobs:
           done
 
   # Storage policy: no permanent heavy files. Uploads live for 1 day
+  # Production deploys: both Vercel projects ship from main only, and only
+  # after every test job is green. Each deploy links by org/project ID from
+  # secrets (no committed .vercel directory) and lets Vercel build remotely
+  # with the Go framework preset each vercel.json already declares. While
+  # the secrets are unset the jobs skip with a notice — the pipeline stays
+  # green from the very first run.
+  deploy-server:
+    name: Deploy — server (API) to Vercel production
+    needs: [server, web, webapp, flutter]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Guard — skip until the Vercel secrets exist
+        id: guard
+        run: |
+          if [ -z "${{ secrets.VERCEL_TOKEN }}" ] || [ -z "${{ secrets.VERCEL_ORG_ID }}" ] || [ -z "${{ secrets.VERCEL_PROJECT_ID_SERVER }}" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::Vercel secrets not set yet (VERCEL_TOKEN, VERCEL_ORG_ID, VERCEL_PROJECT_ID_SERVER) — production deploy skipped"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Deploy to production
+        if: steps.guard.outputs.skip != 'true'
+        working-directory: server
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID_SERVER }}
+        run: |
+          npx --yes vercel@latest deploy --prod --yes --token="$VERCEL_TOKEN"
+
+  deploy-web:
+    name: Deploy — web app to Vercel production
+    needs: [server, web, webapp, flutter]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Guard — skip until the Vercel secrets exist
+        id: guard
+        run: |
+          if [ -z "${{ secrets.VERCEL_TOKEN }}" ] || [ -z "${{ secrets.VERCEL_ORG_ID }}" ] || [ -z "${{ secrets.VERCEL_PROJECT_ID_WEB }}" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::Vercel secrets not set yet (VERCEL_TOKEN, VERCEL_ORG_ID, VERCEL_PROJECT_ID_WEB) — production deploy skipped"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Deploy to production
+        if: steps.guard.outputs.skip != 'true'
+        working-directory: web
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID_WEB }}
+        run: |
+          npx --yes vercel@latest deploy --prod --yes --token="$VERCEL_TOKEN"
+
   # (retention-days: 1) and this job force-deletes anything older, so the
   # repository never accumulates heavy artifacts.
   cleanup:
