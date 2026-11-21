@@ -14,6 +14,7 @@ import (
 	// DB-backed API tests (libsql itself registers through the store package).
 	_ "modernc.org/sqlite"
 
+	"github.com/webdevshayan/city-market/server/catalog"
 	"github.com/webdevshayan/city-market/server/csrf"
 	"github.com/webdevshayan/city-market/server/orders"
 	"github.com/webdevshayan/city-market/server/ratelimit"
@@ -772,5 +773,39 @@ func TestAdminAPIAuthAndUpserts(t *testing.T) {
 	resp, _ = do("PUT", "/api/v1/admin/shops/s-bad", "test-secret", `{"name":"X","lat":999,"lng":0,"active":true}`)
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Fatalf("admin out-of-range coords = %d, want 400", resp.StatusCode)
+	}
+}
+
+// The public catalog endpoint feeds the standalone web app (separate
+// deployment, own domain): the same JSON the admin list serves, but
+// unauthenticated and rate-limited like every public read.
+func TestPublicProductsAPI(t *testing.T) {
+	srv := httptest.NewServer(secureHeaders(newMux()))
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL + "/api/v1/products")
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("products = %d, want 200; body %s", resp.StatusCode, raw)
+	}
+	var list []catalog.Product
+	if err := json.Unmarshal(raw, &list); err != nil {
+		t.Fatalf("decode products: %v", err)
+	}
+	if len(list) == 0 {
+		t.Fatal("seed catalog must not be empty")
+	}
+	found := false
+	for _, p := range list {
+		if p.ID == "beef-1kg" && p.PriceMinor == 140000 && p.ShopID == "s-central" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("seed products missing beef-1kg: %s", raw)
 	}
 }

@@ -190,6 +190,7 @@ func newMuxWith(apiLimit, cartLimit func(http.Handler) http.Handler) *http.Serve
 	mux.Handle("GET /api/v1/finance/simulate-month", apiLimit(http.HandlerFunc(handleSimulateMonth)))
 	mux.Handle("GET /api/v1/match/shop", apiLimit(http.HandlerFunc(handleMatchShop)))
 	mux.Handle("GET /api/v1/match/rider", apiLimit(http.HandlerFunc(handleMatchRider)))
+	mux.Handle("GET /api/v1/products", apiLimit(http.HandlerFunc(handlePublicProducts)))
 	mux.Handle("POST /api/v1/orders", cartLimit(http.HandlerFunc(handlePlaceOrder)))
 	mux.Handle("GET /api/v1/orders/{id}", apiLimit(http.HandlerFunc(handleGetOrder)))
 	mux.Handle("GET /api/v1/shop/orders", apiLimit(http.HandlerFunc(handleShopOrders)))
@@ -875,6 +876,14 @@ func handleAdminListProducts(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusServiceUnavailable, "admin requires the database — set DATABASE_URL")
 		return
 	}
+	writeJSON(w, http.StatusOK, cat.All())
+}
+
+// handlePublicProducts serves the full catalog as JSON, unauthenticated.
+// This is the read endpoint the public web app — a separate deployment on
+// its own domain — builds its shop pages from, so there is exactly one
+// source of truth for what is for sale.
+func handlePublicProducts(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, cat.All())
 }
 
