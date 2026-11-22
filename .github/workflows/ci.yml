@@ -2,8 +2,10 @@ name: CI
 
 # Production discipline: every run happens on main only — tests gate the
 # Vercel production deploys, and production never takes code from anywhere
-# else. Pull requests get no runs by design. workflow_dispatch exists so a
-# run can be retried manually (e.g. redeploy after fixing a Vercel hiccup).
+# else. Pull requests get no runs by design. Jobs are path-scoped: a push
+# that touches only one tree (server/, web/, apps/) builds, tests and
+# deploys that tree alone. workflow_dispatch skips the diff and runs
+# everything — the manual "redeploy after a Vercel hiccup" escape hatch.
 on:
   push:
     branches: [main]
@@ -17,8 +19,54 @@ permissions:
   contents: read
 
 jobs:
+  # Path scoping: the jobs below run only when their own tree changed in
+  # this push. The diff is github.event.before → HEAD, so a batch push is
+  # judged as a whole. An edit to ci.yml itself reruns everything (the CI
+  # code changed), and workflow_dispatch has no diff base — both are the
+  # "run all" escape hatch. success() in each if keeps the default needs
+  # gate: a failed (or skipped) dependency still skips its dependent.
+  changes:
+    name: Detect changed paths
+    runs-on: ubuntu-latest
+    outputs:
+      server: ${{ steps.filter.outputs.server }}
+      web: ${{ steps.filter.outputs.web }}
+      apps: ${{ steps.filter.outputs.apps }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # github.event.before can sit many commits back
+      - id: filter
+        env:
+          BEFORE: ${{ github.event.before }}
+          EVENT: ${{ github.event_name }}
+        run: |
+          all() {
+            echo "server=true" >> "$GITHUB_OUTPUT"
+            echo "web=true" >> "$GITHUB_OUTPUT"
+            echo "apps=true" >> "$GITHUB_OUTPUT"
+          }
+          if [ "$EVENT" != "push" ] || [ -z "$BEFORE" ] || [ "$BEFORE" = "0000000000000000000000000000000000000000" ]; then
+            echo "::notice::no push diff base (event: ${EVENT}) — running every job"
+            all
+            exit 0
+          fi
+          changed=$(git diff --name-only "$BEFORE" "$GITHUB_SHA")
+          echo "changed paths in this push:"
+          echo "$changed"
+          if grep -q '^\.github/workflows/ci\.yml' <<< "$changed"; then
+            echo "::notice::ci.yml itself changed — running every job"
+            all
+            exit 0
+          fi
+          if grep -q '^server/' <<< "$changed"; then echo "server=true" >> "$GITHUB_OUTPUT"; else echo "server=false" >> "$GITHUB_OUTPUT"; fi
+          if grep -q '^web/' <<< "$changed"; then echo "web=true" >> "$GITHUB_OUTPUT"; else echo "web=false" >> "$GITHUB_OUTPUT"; fi
+          if grep -q '^apps/' <<< "$changed"; then echo "apps=true" >> "$GITHUB_OUTPUT"; else echo "apps=false" >> "$GITHUB_OUTPUT"; fi
+
   server:
     name: Go server — vet, Halal-math tests, build
+    needs: changes
+    if: success() && needs.changes.outputs.server == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -37,6 +85,8 @@ jobs:
 
   web:
     name: Tailwind — one minified stylesheet
+    needs: changes
+    if: success() && needs.changes.outputs.web == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -71,6 +121,8 @@ jobs:
 
   webapp:
     name: Web app — vet, test (standalone Go module)
+    needs: changes
+    if: success() && needs.changes.outputs.web == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -87,6 +139,8 @@ jobs:
 
   flutter:
     name: Flutter — analyze + test core and the four apps
+    needs: changes
+    if: success() && needs.changes.outputs.apps == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -103,8 +157,10 @@ jobs:
             echo "::endgroup::"
           done
 
-  # Production deploys: both Vercel projects ship from main only, and only
-  # after every test job is green. Each deploy links by org/project ID (repo
+  # Production deploys: each Vercel project ships from main only, and only
+  # after its own tree's tests are green on a push that touched that tree
+  # (the changes job scopes them; an Android-only push deploys neither).
+  # Each deploy links by org/project ID (repo
   # variables or secrets — no committed .vercel directory) and lets Vercel
   # build remotely with the Go framework preset each vercel.json already
   # declares; each job uses its own Vercel token. Credentials are read as
@@ -113,7 +169,8 @@ jobs:
   # pipeline stays green from the very first run.
   deploy-server:
     name: Deploy — server (API) to Vercel production
-    needs: [server, web, webapp, flutter]
+    needs: [changes, server]
+    if: success() && needs.changes.outputs.server == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -146,7 +203,8 @@ jobs:
 
   deploy-web:
     name: Deploy — web app to Vercel production
-    needs: [server, web, webapp, flutter]
+    needs: [changes, web, webapp]
+    if: success() && needs.changes.outputs.web == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
