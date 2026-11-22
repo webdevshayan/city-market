@@ -141,7 +141,7 @@ ThemeData buildCMTheme() {
       behavior: SnackBarBehavior.floating,
       shape: zero,
     ),
-    dialogTheme: const DialogThemeData(
+    dialogTheme: const DialogTheme(
         shape: zero, backgroundColor: CMColors.paper),
     bottomSheetTheme: const BottomSheetThemeData(shape: zero, backgroundColor: CMColors.paper),
     progressIndicatorTheme: const ProgressIndicatorThemeData(
