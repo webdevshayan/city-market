@@ -14,6 +14,7 @@ class FakeApi implements ApiClient {
     List<Place>? shops,
     List<Place>? riders,
     CommissionView? commission,
+    AdminStats? stats,
   })  : products_ = products ??
             [
               const Product(
@@ -74,7 +75,35 @@ class FakeApi implements ApiClient {
             ],
         commission_ = commission ??
             const CommissionView(
-                monthlyOrders: 250, salesMinor: 10000000, commissionMinor: 700000, rateBps: 700, capped: false);
+                monthlyOrders: 250, salesMinor: 10000000, commissionMinor: 700000, rateBps: 700, capped: false),
+        stats_ = stats ??
+            const AdminStats(
+              shopsTotal: 2,
+              shopsActive: 2,
+              shopsSelling: 1,
+              ridersTotal: 3,
+              ridersAvailable: 2,
+              ridersPaid: 1,
+              ordersTotal: 4,
+              ordersByStatus: {'placed': 1, 'delivered': 2, 'cancelled': 1},
+              gmvMinor: 465000,
+              gmvMonthMinor: 465000,
+              riderPayoutsMinor: 25500,
+              platformUjrahMinor: 31100,
+              shops: [
+                ShopSettlement(
+                    id: 's-central',
+                    name: 'Central Market Halal Store',
+                    orders: 1,
+                    salesMinor: 280000,
+                    ujrahMinor: 0,
+                    netMinor: 280000),
+              ],
+              riders: [
+                RiderEarnings(id: 'r-1', name: 'Rider 1', deliveries: 2, payoutMinor: 25500),
+                RiderEarnings(id: 'r-2', name: 'Rider 2', deliveries: 0, payoutMinor: 0),
+              ],
+            );
 
   final List<Product> products_;
   final Order placedOrder;
@@ -82,6 +111,7 @@ class FakeApi implements ApiClient {
   final List<Place> shops_;
   final List<Place> riders_;
   final CommissionView commission_;
+  final AdminStats stats_;
 
   // Recorded calls the widget tests assert against.
   final placeOrderCalls = <List<OrderDraftItem>>[];
@@ -162,6 +192,9 @@ class FakeApi implements ApiClient {
 
   @override
   Future<List<Place>> adminRiders(String adminToken) async => riders_;
+
+  @override
+  Future<AdminStats> adminStats(String adminToken) async => stats_;
 
   @override
   Future<List<Product>> adminProducts(String adminToken) async => products_;

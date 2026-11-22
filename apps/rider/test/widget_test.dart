@@ -35,12 +35,12 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('pick up-ord-r-1')));
     await tester.pumpAndSettle();
     expect(api.pickUpCalls, ['ord-r-1']);
-    expect(find.text('picked_up'), findsOneWidget);
+    expect(find.text('Picked up'), findsOneWidget);
 
     await tester.tap(find.byKey(const ValueKey('deliver-ord-r-1')));
     await tester.pumpAndSettle();
     expect(api.deliverCalls, ['ord-r-1']);
-    expect(find.text('delivered'), findsOneWidget);
+    expect(find.text('Delivered'), findsOneWidget);
     // Delivered orders show no action button.
     expect(find.byKey(const ValueKey('deliver-ord-r-1')), findsNothing);
   });
