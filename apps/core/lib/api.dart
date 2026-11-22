@@ -3,6 +3,7 @@
 /// is the real JSON-over-HTTP implementation.
 library;
 
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:core/models.dart';
@@ -42,6 +43,7 @@ abstract class ApiClient {
 
   Future<List<Place>> adminShops(String adminToken);
   Future<List<Place>> adminRiders(String adminToken);
+  Future<AdminStats> adminStats(String adminToken);
   Future<List<Product>> adminProducts(String adminToken);
   Future<void> adminUpsertShop(String adminToken,
       {required String id, required String name, required double lat, required double lng, required bool active});
@@ -61,6 +63,11 @@ abstract class ApiClient {
 class HttpApiClient implements ApiClient {
   final String baseUrl;
   final http.Client _http;
+
+  /// Hard ceiling on any request, headers to body. The OS default for an
+  /// unreachable host can stall a request for minutes — an app that points
+  /// at a dead server must surface a clear error in seconds, not spin.
+  static const _timeout = Duration(seconds: 20);
 
   HttpApiClient(this.baseUrl, {http.Client? client}) : _http = client ?? http.Client();
 
@@ -126,6 +133,10 @@ class HttpApiClient implements ApiClient {
     final list = await _list('GET', '/v1/admin/riders', adminToken: adminToken) as List<dynamic>;
     return list.map((e) => Place.fromJson(e as Map<String, dynamic>)).toList();
   }
+
+  @override
+  Future<AdminStats> adminStats(String adminToken) async => AdminStats.fromJson(
+      await _json('GET', '/v1/admin/stats', adminToken: adminToken) as Map<String, dynamic>);
 
   @override
   Future<List<Product>> adminProducts(String adminToken) async {
@@ -199,8 +210,14 @@ class HttpApiClient implements ApiClient {
     if (body != null) {
       req.body = body;
     }
-    final resp = await _http.send(req);
-    final streamed = await http.Response.fromStream(resp);
+    final http.Response streamed;
+    try {
+      final resp = await _http.send(req).timeout(_timeout);
+      streamed = await http.Response.fromStream(resp).timeout(_timeout);
+    } on TimeoutException {
+      throw ApiException(0,
+          'The market server did not respond within 20 s — check your internet connection and try again.');
+    }
     if (streamed.statusCode < 200 || streamed.statusCode >= 300) {
       var message = 'HTTP ${streamed.statusCode}';
       try {

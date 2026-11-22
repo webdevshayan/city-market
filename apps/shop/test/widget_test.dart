@@ -10,14 +10,14 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.textContaining('ord-shop-1'), findsOneWidget);
-    expect(find.text('placed'), findsOneWidget);
+    expect(find.text('Placed'), findsOneWidget);
     expect(find.byKey(const ValueKey('confirm-ord-shop-1')), findsOneWidget);
 
     await tester.tap(find.byKey(const ValueKey('confirm-ord-shop-1')));
     await tester.pumpAndSettle();
 
     expect(api.confirmCalls, ['ord-shop-1']);
-    expect(find.text('confirmed'), findsOneWidget); // the reloaded status chip
+    expect(find.text('Confirmed'), findsOneWidget); // the reloaded status chip
     expect(find.byKey(const ValueKey('confirm-ord-shop-1')), findsNothing);
   });
 

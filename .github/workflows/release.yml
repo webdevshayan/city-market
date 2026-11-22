@@ -110,14 +110,21 @@ jobs:
           fi
 
       - name: Build the four release APKs (one versioned bundle per change)
+        env:
+          # THE fix for "the apps never load": the API base is baked into the
+          # APK at build time. Without this dart-define the apps shipped with
+          # the 10.0.2.2 emulator default and had no server to talk to on a
+          # real phone. Override with the APP_API_BASE_URL repo variable.
+          API_BASE: ${{ vars.APP_API_BASE_URL || 'https://cmserver.vercel.app' }}
         run: |
           VER="0.4.${GITHUB_RUN_NUMBER}"
-          echo "version: $VER  build: ${GITHUB_RUN_NUMBER}"
+          echo "version: $VER  build: ${GITHUB_RUN_NUMBER}  api: ${API_BASE}"
           for app in citizen shop rider admin; do
             echo "::group::build $app"
             (cd "apps/$app" \
               && flutter pub get \
               && flutter build apk --release \
+                   --dart-define=API_BASE_URL="${API_BASE}" \
                    --build-name="$VER" --build-number="${GITHUB_RUN_NUMBER}") \
               || exit 1
             echo "::endgroup::"
@@ -159,7 +166,7 @@ jobs:
             echo
             echo "### Install"
             echo "- Requires Android 5.0+ (minSdk 21). Side-load: tap the APK, allow \"install unknown apps\" once."
-            echo "- API base is baked at build time (\`API_BASE_URL\`, currently the local dev default)."
+            echo "- API base is baked at build time (\`API_BASE_URL\`, \`${{ vars.APP_API_BASE_URL || 'https://cmserver.vercel.app' }}\`). Requests time out after 20 s with a clear retry screen."
             if [ -f apps/citizen/android/app/release-keystore.p12 ]; then
               FPR=$(keytool -list -storetype PKCS12 \
                     -keystore apps/citizen/android/app/release-keystore.p12 \
