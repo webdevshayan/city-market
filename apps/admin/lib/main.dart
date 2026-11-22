@@ -39,7 +39,9 @@ class AdminHomeScreen extends StatefulWidget {
 class _AdminHomeScreenState extends State<AdminHomeScreen> {
   final _token = TextEditingController(text: '');
   String? _tokenValue; // null until the admin signs in
-  late Future<AdminStats> _stats = _load();
+  // Created only at sign-in — an eagerly-created future would fire (and, on
+  // a bad token, throw unlistened) before the dashboard exists to catch it.
+  Future<AdminStats>? _stats;
 
   Future<AdminStats> _load() => widget.api.adminStats(_tokenValue ?? '');
 
