@@ -87,6 +87,19 @@ framework preset; web: the api/ function convention). Rollbacks are
 Vercel-native: promote any previous
 deployment from the project's Deployments tab.
 
+## What a push deploys (path scoping)
+
+The `changes` job diffs each push against the previous main head and
+scopes the pipeline to what changed: `server/**` builds, tests and
+deploys the API; `web/**` the web app; `apps/**` the APK bundle. A push
+touching only docs (or none of those trees) runs no deploys and no APK
+build — an Android-only change no longer redeploys the server or the web
+app, and a server-only change no longer rebuilds the shop. Editing a
+workflow file reruns that workflow's whole pipeline, and
+`workflow_dispatch` (Actions tab → Run workflow) bypasses the diff
+entirely: the manual "deploy everything" escape hatch. Release versions
+count workflow runs, so skipped runs leave gaps in the v0.4.N numbering.
+
 ## Note on pull requests
 
 PRs get no CI by design (the pipeline's only triggers are `push: main` and
