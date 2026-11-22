@@ -151,6 +151,7 @@ func newMuxWith(apiLimit, cartLimit func(http.Handler) http.Handler) *http.Serve
 	mux.Handle("GET /v1/admin/riders", apiLimit(adminAuth(http.HandlerFunc(handleAdminListRiders))))
 	mux.Handle("GET /v1/admin/products", apiLimit(adminAuth(http.HandlerFunc(handleAdminListProducts))))
 	mux.Handle("GET /v1/admin/commission", apiLimit(adminAuth(http.HandlerFunc(handleAdminCommission))))
+	mux.Handle("GET /v1/admin/stats", apiLimit(adminAuth(http.HandlerFunc(handleAdminStats))))
 	mux.Handle("PUT /v1/admin/shops/{id}", cartLimit(adminAuth(http.HandlerFunc(handleAdminUpsertShop))))
 	mux.Handle("PUT /v1/admin/riders/{id}", cartLimit(adminAuth(http.HandlerFunc(handleAdminUpsertRider))))
 	mux.Handle("PUT /v1/admin/products/{id}", cartLimit(adminAuth(http.HandlerFunc(handleAdminUpsertProduct))))
@@ -178,7 +179,7 @@ func handleAPIIndex(w http.ResponseWriter, r *http.Request) {
 			"GET /v1/shop/orders?shop_id=… | GET /v1/rider/orders?rider_id=…",
 			"POST /v1/shop/orders/{id}/confirm",
 			"POST /v1/rider/orders/{id}/pick-up | /deliver",
-			"GET|PUT /v1/admin/{shops,riders,products,…} (X-Admin-Token)",
+			"GET|PUT /v1/admin/{shops,riders,products,commission,stats} (X-Admin-Token)",
 		},
 	})
 }
@@ -606,6 +607,23 @@ func handleAdminCommission(w http.ResponseWriter, r *http.Request) {
 		"commission_rate_bps": rateBps,
 		"commission_capped":   capped,
 	})
+}
+
+// handleAdminStats serves the admin console's stats view: revenue (GMV and
+// the platform's Ujrah), rider payouts, and who is working and earning.
+// The math lives in the orders service (orders.Service.Stats) — the
+// handler only guards the nil store and serializes.
+func handleAdminStats(w http.ResponseWriter, r *http.Request) {
+	if orderSvc == nil {
+		writeErr(w, http.StatusServiceUnavailable, "orders require Turso — set DATABASE_URL")
+		return
+	}
+	snap, err := orderSvc.Stats()
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, snap)
 }
 
 // decodeStrict decodes a JSON body with a size cap and unknown-field

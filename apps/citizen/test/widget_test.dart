@@ -33,7 +33,7 @@ void main() {
     expect(api.placeOrderCalls, hasLength(1));
     expect(api.placeOrderCalls.single.single.productId, 'beef-1kg');
     expect(find.textContaining('ord-test-1'), findsOneWidget);
-    expect(find.text('placed'), findsOneWidget);
+    expect(find.text('Placed'), findsOneWidget); // the status chip, in words
     expect(find.text('Central Market Halal Store'), findsOneWidget);
     expect(find.text('2825.00'), findsOneWidget); // server-priced total
   });

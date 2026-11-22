@@ -177,3 +177,115 @@ class CommissionView {
 /// server's PriceText, so both sides of the wire display identically.
 String money(int minor) =>
     '${minor ~/ 100}.${(minor % 100).toString().padLeft(2, '0')}';
+
+/// One shop's current-month settlement row from GET /v1/admin/stats:
+/// the delivered sales the Ujrah schedule settles over, the platform's
+/// commission on them, and what the shop nets.
+class ShopSettlement {
+  final String id;
+  final String name;
+  final int orders;
+  final int salesMinor;
+  final int ujrahMinor;
+  final int netMinor;
+
+  const ShopSettlement({
+    required this.id,
+    required this.name,
+    required this.orders,
+    required this.salesMinor,
+    required this.ujrahMinor,
+    required this.netMinor,
+  });
+
+  factory ShopSettlement.fromJson(Map<String, dynamic> j) => ShopSettlement(
+        id: j['id'] as String,
+        name: j['name'] as String,
+        orders: (j['orders'] as num).toInt(),
+        salesMinor: (j['sales_minor'] as num).toInt(),
+        ujrahMinor: (j['ujrah_minor'] as num).toInt(),
+        netMinor: (j['net_minor'] as num).toInt(),
+      );
+}
+
+/// One rider's all-time payout row from GET /v1/admin/stats — payouts are
+/// earned at delivery, so only delivered orders appear.
+class RiderEarnings {
+  final String id;
+  final String name;
+  final int deliveries;
+  final int payoutMinor;
+
+  const RiderEarnings({
+    required this.id,
+    required this.name,
+    required this.deliveries,
+    required this.payoutMinor,
+  });
+
+  factory RiderEarnings.fromJson(Map<String, dynamic> j) => RiderEarnings(
+        id: j['id'] as String,
+        name: j['name'] as String,
+        deliveries: (j['deliveries'] as num).toInt(),
+        payoutMinor: (j['payout_minor'] as num).toInt(),
+      );
+}
+
+/// The admin console's whole stats view: revenue (GMV and the platform's
+/// Ujrah), rider payouts, and who is working and earning. Money in minor
+/// units, exactly as the server computes it.
+class AdminStats {
+  final int shopsTotal;
+  final int shopsActive;
+  final int shopsSelling;
+  final int ridersTotal;
+  final int ridersAvailable;
+  final int ridersPaid;
+  final int ordersTotal;
+  final Map<String, int> ordersByStatus;
+  final int gmvMinor;
+  final int gmvMonthMinor;
+  final int riderPayoutsMinor;
+  final int platformUjrahMinor;
+  final List<ShopSettlement> shops;
+  final List<RiderEarnings> riders;
+
+  const AdminStats({
+    required this.shopsTotal,
+    required this.shopsActive,
+    required this.shopsSelling,
+    required this.ridersTotal,
+    required this.ridersAvailable,
+    required this.ridersPaid,
+    required this.ordersTotal,
+    required this.ordersByStatus,
+    required this.gmvMinor,
+    required this.gmvMonthMinor,
+    required this.riderPayoutsMinor,
+    required this.platformUjrahMinor,
+    required this.shops,
+    required this.riders,
+  });
+
+  factory AdminStats.fromJson(Map<String, dynamic> j) => AdminStats(
+        shopsTotal: (j['shops_total'] as num?)?.toInt() ?? 0,
+        shopsActive: (j['shops_active'] as num?)?.toInt() ?? 0,
+        shopsSelling: (j['shops_selling'] as num?)?.toInt() ?? 0,
+        ridersTotal: (j['riders_total'] as num?)?.toInt() ?? 0,
+        ridersAvailable: (j['riders_available'] as num?)?.toInt() ?? 0,
+        ridersPaid: (j['riders_paid'] as num?)?.toInt() ?? 0,
+        ordersTotal: (j['orders_total'] as num?)?.toInt() ?? 0,
+        ordersByStatus: (j['orders_by_status'] as Map<String, dynamic>? ?? {})
+            .map((k, v) => MapEntry(k, (v as num).toInt())),
+        gmvMinor: (j['gmv_minor'] as num?)?.toInt() ?? 0,
+        gmvMonthMinor: (j['gmv_month_minor'] as num?)?.toInt() ?? 0,
+        riderPayoutsMinor: (j['rider_payouts_minor'] as num?)?.toInt() ?? 0,
+        platformUjrahMinor: (j['platform_ujrah_minor'] as num?)?.toInt() ?? 0,
+        shops: (j['shops'] as List<dynamic>? ?? [])
+            .map((e) => ShopSettlement.fromJson(e as Map<String, dynamic>))
+            .toList(),
+        riders: (j['riders'] as List<dynamic>? ?? [])
+            .map((e) => RiderEarnings.fromJson(e as Map<String, dynamic>))
+            .toList(),
+      );
+}

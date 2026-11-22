@@ -1,4 +1,5 @@
 import 'package:core/api.dart';
+import 'package:core/design.dart';
 import 'package:core/models.dart';
 import 'package:flutter/material.dart';
 
@@ -15,10 +16,7 @@ class CityMarketShopApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'City Market — Shop',
-      theme: ThemeData(
-        colorSchemeSeed: const Color(0xFF15803D), // halal-700 brand green
-        useMaterial3: true,
-      ),
+      theme: buildCMTheme(),
       home: ShopHomeScreen(
         api: HttpApiClient(
           const String.fromEnvironment('API_BASE_URL', defaultValue: 'http://10.0.2.2:3000'),
@@ -102,9 +100,12 @@ class _ShopHomeScreenState extends State<ShopHomeScreen> {
               future: _orders,
               builder: (context, snap) {
                 if (snap.hasError) {
-                  return ListView(children: [
-                    ListTile(title: Text('Could not load orders: ${snap.error}')),
-                  ]);
+                  return ListView(
+                    children: [
+                      const SizedBox(height: 80),
+                      CMErrorRetry(error: snap.error!, onRetry: _reload),
+                    ],
+                  );
                 }
                 if (!snap.hasData) {
                   return const Center(child: CircularProgressIndicator());
@@ -118,7 +119,7 @@ class _ShopHomeScreenState extends State<ShopHomeScreen> {
                   itemBuilder: (context, i) {
                     final o = orders[i];
                     return ListTile(
-                      leading: Chip(label: Text(o.status)),
+                      leading: CMStatusChip(o.status),
                       title: Text('Order ${o.id}'),
                       subtitle: Text('${o.items.length} line(s) · ${money(o.totalMinor)}'),
                       trailing: o.status == statusPlaced
