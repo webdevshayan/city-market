@@ -4,8 +4,8 @@
 // PORT environment variable.
 //
 // The public web app is a separate standalone project on its own domain
-// (see web/) — it reads the catalog from GET /api/v1/products and places
-// orders through POST /api/v1/orders. This deployment is API-only: JSON in,
+// (see web/) — it reads the catalog from GET /v1/products and places
+// orders through POST /v1/orders. This deployment is API-only: JSON in,
 // JSON out, HTML nowhere.
 package main
 
@@ -132,28 +132,28 @@ func newMuxWith(apiLimit, cartLimit func(http.Handler) http.Handler) *http.Serve
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /{$}", handleAPIIndex)
 	mux.HandleFunc("GET /healthz", handleHealth)
-	mux.Handle("GET /api/v1/finance/ujrah", apiLimit(http.HandlerFunc(handleUjrah)))
-	mux.Handle("GET /api/v1/finance/rider", apiLimit(http.HandlerFunc(handleRiderPayout)))
-	mux.Handle("GET /api/v1/finance/checkout-fee", apiLimit(http.HandlerFunc(handleCheckoutFee)))
-	mux.Handle("GET /api/v1/finance/simulate-month", apiLimit(http.HandlerFunc(handleSimulateMonth)))
-	mux.Handle("GET /api/v1/match/shop", apiLimit(http.HandlerFunc(handleMatchShop)))
-	mux.Handle("GET /api/v1/match/rider", apiLimit(http.HandlerFunc(handleMatchRider)))
-	mux.Handle("GET /api/v1/products", apiLimit(http.HandlerFunc(handlePublicProducts)))
-	mux.Handle("POST /api/v1/orders", cartLimit(http.HandlerFunc(handlePlaceOrder)))
-	mux.Handle("GET /api/v1/orders/{id}", apiLimit(http.HandlerFunc(handleGetOrder)))
-	mux.Handle("GET /api/v1/shop/orders", apiLimit(http.HandlerFunc(handleShopOrders)))
-	mux.Handle("GET /api/v1/rider/orders", apiLimit(http.HandlerFunc(handleRiderOrders)))
-	mux.Handle("POST /api/v1/shop/orders/{id}/confirm", cartLimit(http.HandlerFunc(handleOrderTransition(orders.StatusConfirmed))))
-	mux.Handle("POST /api/v1/rider/orders/{id}/pick-up", cartLimit(http.HandlerFunc(handleOrderTransition(orders.StatusPickedUp))))
-	mux.Handle("POST /api/v1/rider/orders/{id}/deliver", cartLimit(http.HandlerFunc(handleOrderTransition(orders.StatusDelivered))))
+	mux.Handle("GET /v1/finance/ujrah", apiLimit(http.HandlerFunc(handleUjrah)))
+	mux.Handle("GET /v1/finance/rider", apiLimit(http.HandlerFunc(handleRiderPayout)))
+	mux.Handle("GET /v1/finance/checkout-fee", apiLimit(http.HandlerFunc(handleCheckoutFee)))
+	mux.Handle("GET /v1/finance/simulate-month", apiLimit(http.HandlerFunc(handleSimulateMonth)))
+	mux.Handle("GET /v1/match/shop", apiLimit(http.HandlerFunc(handleMatchShop)))
+	mux.Handle("GET /v1/match/rider", apiLimit(http.HandlerFunc(handleMatchRider)))
+	mux.Handle("GET /v1/products", apiLimit(http.HandlerFunc(handlePublicProducts)))
+	mux.Handle("POST /v1/orders", cartLimit(http.HandlerFunc(handlePlaceOrder)))
+	mux.Handle("GET /v1/orders/{id}", apiLimit(http.HandlerFunc(handleGetOrder)))
+	mux.Handle("GET /v1/shop/orders", apiLimit(http.HandlerFunc(handleShopOrders)))
+	mux.Handle("GET /v1/rider/orders", apiLimit(http.HandlerFunc(handleRiderOrders)))
+	mux.Handle("POST /v1/shop/orders/{id}/confirm", cartLimit(http.HandlerFunc(handleOrderTransition(orders.StatusConfirmed))))
+	mux.Handle("POST /v1/rider/orders/{id}/pick-up", cartLimit(http.HandlerFunc(handleOrderTransition(orders.StatusPickedUp))))
+	mux.Handle("POST /v1/rider/orders/{id}/deliver", cartLimit(http.HandlerFunc(handleOrderTransition(orders.StatusDelivered))))
 	// Admin console: rate limit OUTSIDE auth so token guessing is throttled.
-	mux.Handle("GET /api/v1/admin/shops", apiLimit(adminAuth(http.HandlerFunc(handleAdminListShops))))
-	mux.Handle("GET /api/v1/admin/riders", apiLimit(adminAuth(http.HandlerFunc(handleAdminListRiders))))
-	mux.Handle("GET /api/v1/admin/products", apiLimit(adminAuth(http.HandlerFunc(handleAdminListProducts))))
-	mux.Handle("GET /api/v1/admin/commission", apiLimit(adminAuth(http.HandlerFunc(handleAdminCommission))))
-	mux.Handle("PUT /api/v1/admin/shops/{id}", cartLimit(adminAuth(http.HandlerFunc(handleAdminUpsertShop))))
-	mux.Handle("PUT /api/v1/admin/riders/{id}", cartLimit(adminAuth(http.HandlerFunc(handleAdminUpsertRider))))
-	mux.Handle("PUT /api/v1/admin/products/{id}", cartLimit(adminAuth(http.HandlerFunc(handleAdminUpsertProduct))))
+	mux.Handle("GET /v1/admin/shops", apiLimit(adminAuth(http.HandlerFunc(handleAdminListShops))))
+	mux.Handle("GET /v1/admin/riders", apiLimit(adminAuth(http.HandlerFunc(handleAdminListRiders))))
+	mux.Handle("GET /v1/admin/products", apiLimit(adminAuth(http.HandlerFunc(handleAdminListProducts))))
+	mux.Handle("GET /v1/admin/commission", apiLimit(adminAuth(http.HandlerFunc(handleAdminCommission))))
+	mux.Handle("PUT /v1/admin/shops/{id}", cartLimit(adminAuth(http.HandlerFunc(handleAdminUpsertShop))))
+	mux.Handle("PUT /v1/admin/riders/{id}", cartLimit(adminAuth(http.HandlerFunc(handleAdminUpsertRider))))
+	mux.Handle("PUT /v1/admin/products/{id}", cartLimit(adminAuth(http.HandlerFunc(handleAdminUpsertProduct))))
 	// Catch-all: anything unmatched gets a JSON 404 — this deployment serves
 	// no HTML pages. Go's mux routes the most specific pattern first, so this
 	// never shadows the routes above.
@@ -163,22 +163,22 @@ func newMuxWith(apiLimit, cartLimit func(http.Handler) http.Handler) *http.Serve
 
 // handleAPIIndex describes the API at the root path: this deployment is the
 // backend only — the public web app is a separate project on its own domain
-// (see web/), reading the catalog from GET /api/v1/products.
+// (see web/), reading the catalog from GET /v1/products.
 func handleAPIIndex(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"service": "city-market API",
 		"note":    "the public web app is a separate deployment — see web/",
 		"endpoints": []string{
 			"GET /healthz",
-			"GET /api/v1/products",
-			"GET /api/v1/finance/{ujrah,rider,checkout-fee,simulate-month}",
-			"GET /api/v1/match/{shop,rider}",
-			"POST /api/v1/orders",
-			"GET /api/v1/orders/{id}",
-			"GET /api/v1/shop/orders?shop_id=… | GET /api/v1/rider/orders?rider_id=…",
-			"POST /api/v1/shop/orders/{id}/confirm",
-			"POST /api/v1/rider/orders/{id}/pick-up | /deliver",
-			"GET|PUT /api/v1/admin/{shops,riders,products,…} (X-Admin-Token)",
+			"GET /v1/products",
+			"GET /v1/finance/{ujrah,rider,checkout-fee,simulate-month}",
+			"GET /v1/match/{shop,rider}",
+			"POST /v1/orders",
+			"GET /v1/orders/{id}",
+			"GET /v1/shop/orders?shop_id=… | GET /v1/rider/orders?rider_id=…",
+			"POST /v1/shop/orders/{id}/confirm",
+			"POST /v1/rider/orders/{id}/pick-up | /deliver",
+			"GET|PUT /v1/admin/{shops,riders,products,…} (X-Admin-Token)",
 		},
 	})
 }
@@ -316,7 +316,7 @@ type placeOrderBody struct {
 // write bucket guards it too — both are state-changing citizen posts.
 func handlePlaceOrder(w http.ResponseWriter, r *http.Request) {
 	if orderSvc == nil {
-		writeErr(w, http.StatusServiceUnavailable, "orders require the database — set DATABASE_URL")
+		writeErr(w, http.StatusServiceUnavailable, "orders require Turso — set DATABASE_URL")
 		return
 	}
 	var body placeOrderBody
@@ -355,7 +355,7 @@ func handlePlaceOrder(w http.ResponseWriter, r *http.Request) {
 // are unguessable and this stays unauthenticated in the demo).
 func handleGetOrder(w http.ResponseWriter, r *http.Request) {
 	if orderSvc == nil {
-		writeErr(w, http.StatusServiceUnavailable, "orders require the database — set DATABASE_URL")
+		writeErr(w, http.StatusServiceUnavailable, "orders require Turso — set DATABASE_URL")
 		return
 	}
 	o, err := orderSvc.ByID(r.PathValue("id"))
@@ -381,7 +381,7 @@ func handleRiderOrders(w http.ResponseWriter, r *http.Request) {
 
 func listOrders(w http.ResponseWriter, r *http.Request, id, param string, load func(string) ([]orders.Order, error)) {
 	if orderSvc == nil {
-		writeErr(w, http.StatusServiceUnavailable, "orders require the database — set DATABASE_URL")
+		writeErr(w, http.StatusServiceUnavailable, "orders require Turso — set DATABASE_URL")
 		return
 	}
 	if id == "" {
@@ -402,7 +402,7 @@ func listOrders(w http.ResponseWriter, r *http.Request, id, param string, load f
 func handleOrderTransition(to orders.Status) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if orderSvc == nil {
-			writeErr(w, http.StatusServiceUnavailable, "orders require the database — set DATABASE_URL")
+			writeErr(w, http.StatusServiceUnavailable, "orders require Turso — set DATABASE_URL")
 			return
 		}
 		o, err := orderSvc.Transition(r.PathValue("id"), to)
@@ -442,7 +442,7 @@ func adminAuth(next http.Handler) http.Handler {
 // nature, so without a database they are refused, not faked.
 func adminWrite(w http.ResponseWriter) bool {
 	if dbStore == nil || !dbStore.Enabled() {
-		writeErr(w, http.StatusServiceUnavailable, "admin writes require the database — set DATABASE_URL")
+		writeErr(w, http.StatusServiceUnavailable, "admin writes require Turso — set DATABASE_URL")
 		return false
 	}
 	return true
@@ -458,7 +458,7 @@ func handleAdminListRiders(w http.ResponseWriter, r *http.Request) {
 
 func listAdminPlaces(w http.ResponseWriter, load func() ([]match.Place, error)) {
 	if dbStore == nil || !dbStore.Enabled() {
-		writeErr(w, http.StatusServiceUnavailable, "admin requires the database — set DATABASE_URL")
+		writeErr(w, http.StatusServiceUnavailable, "admin requires Turso — set DATABASE_URL")
 		return
 	}
 	list, err := load()
@@ -471,7 +471,7 @@ func listAdminPlaces(w http.ResponseWriter, load func() ([]match.Place, error)) 
 
 func handleAdminListProducts(w http.ResponseWriter, r *http.Request) {
 	if dbStore == nil || !dbStore.Enabled() {
-		writeErr(w, http.StatusServiceUnavailable, "admin requires the database — set DATABASE_URL")
+		writeErr(w, http.StatusServiceUnavailable, "admin requires Turso — set DATABASE_URL")
 		return
 	}
 	writeJSON(w, http.StatusOK, cat.All())
@@ -620,9 +620,19 @@ func decodeStrict(w http.ResponseWriter, r *http.Request, v any) error {
 	return nil
 }
 
-// handleHealth is the API health check.
+// handleHealth is the API health check. The database field names the active
+// store — "turso" once DATABASE_URL is wired, "seed" while serving fixtures
+// (docs/DEPLOY.md lists the env vars that flip it).
 func handleHealth(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "service": "city-market-server"})
+	db := "seed"
+	if dbStore != nil {
+		db = "turso"
+	}
+	writeJSON(w, http.StatusOK, map[string]string{
+		"status":   "ok",
+		"service":  "city-market-server",
+		"database": db,
+	})
 }
 
 func handleUjrah(w http.ResponseWriter, r *http.Request) {

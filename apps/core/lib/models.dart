@@ -4,8 +4,8 @@
 /// server (server/finance, server/orders) is the single source of truth.
 library;
 
-/// One catalog listing, as served by GET /api/v1/admin/products and the
-/// catalog the citizen app browses.
+/// One catalog listing, as served by GET /v1/products — the public catalog
+/// the citizen app browses.
 class Product {
   final String id;
   final String name;
@@ -146,7 +146,7 @@ class Place {
       );
 }
 
-/// The commission settlement view from GET /api/v1/admin/commission.
+/// The commission settlement view from GET /v1/admin/commission.
 class CommissionView {
   final int monthlyOrders;
   final int salesMinor;

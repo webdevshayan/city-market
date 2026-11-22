@@ -22,7 +22,7 @@ import (
 // this is the single place to change it.
 const CurrencyCode = "PKR"
 
-// Product mirrors one row of GET /api/v1/products (the API's JSON, snake_case).
+// Product mirrors one row of GET /v1/products (the API's JSON, snake_case).
 type Product struct {
 	ID         string `json:"id"`
 	Name       string `json:"name"`
@@ -51,7 +51,7 @@ type CatalogSource interface {
 // empty grid — the storefront stays up, honestly empty.
 var ErrCatalogUnavailable = errors.New("catalog API unavailable and no snapshot cached")
 
-// APISource fetches GET /api/v1/products from the City Market server and
+// APISource fetches GET /v1/products from the City Market server and
 // keeps the last good snapshot in memory: when the API blips, the
 // storefront serves the stale catalog instead of failing. There is no seed
 // fallback here on purpose — the web app must not carry a second copy of
@@ -75,7 +75,7 @@ func NewAPISource(base string) *APISource {
 // All returns the current catalog, or the last good snapshot while the API
 // is down, or ErrCatalogUnavailable if nothing has ever loaded.
 func (s *APISource) All(ctx context.Context) ([]Product, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, s.base+"/api/v1/products", nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, s.base+"/v1/products", nil)
 	if err != nil {
 		return s.fallback()
 	}

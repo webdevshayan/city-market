@@ -37,7 +37,7 @@ void main() {
     final o = await api.placeOrder([OrderDraftItem('beef-1kg', 2)], 24.8607, 67.0011);
 
     expect(captured!.method, 'POST');
-    expect(captured!.url.path, '/api/v1/orders');
+    expect(captured!.url.path, '/v1/orders');
     final body = jsonDecode(captured!.body) as Map<String, dynamic>;
     expect(body['items'], hasLength(1));
     expect((body['items'] as List).first, containsPair('product_id', 'beef-1kg'));
@@ -71,7 +71,7 @@ void main() {
     await api.pickUpOrder('ord-1');
     await api.deliverOrder('ord-1');
 
-    expect(paths, ['/api/v1/shop/orders/ord-1/confirm', '/api/v1/rider/orders/ord-1/pick-up', '/api/v1/rider/orders/ord-1/deliver']);
+    expect(paths, ['/v1/shop/orders/ord-1/confirm', '/v1/rider/orders/ord-1/pick-up', '/v1/rider/orders/ord-1/deliver']);
   });
 
   test('admin calls carry the token header', () async {
@@ -106,9 +106,9 @@ void main() {
         shopId: 's-dha');
 
     expect(requests[0].method, 'PUT');
-    expect(requests[0].url.path, '/api/v1/admin/shops/s-dha');
+    expect(requests[0].url.path, '/v1/admin/shops/s-dha');
     expect(jsonDecode(requests[0].body)['name'], 'DHA Store');
-    expect(requests[1].url.path, '/api/v1/admin/products/gajar-1kg');
+    expect(requests[1].url.path, '/v1/admin/products/gajar-1kg');
     expect(jsonDecode(requests[1].body)['price_minor'], 50000);
   });
 }
