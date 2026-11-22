@@ -194,7 +194,7 @@ class CMStatTile extends StatelessWidget {
   final String value;
   final String? hint;
 
-  const CMStatTile({super.key, required this.label, required this.value, this.hint});
+  const CMStatTile(this.label, this.value, {super.key, this.hint});
 
   @override
   Widget build(BuildContext context) {
