@@ -5,7 +5,7 @@
 // and the visitor cart as a signed cookie.
 //
 // It has no database and no business rules. The catalog is fetched from the
-// City Market API (the server deployment) via GET /api/v1/products; every
+// City Market API (the server deployment) via GET /v1/products; every
 // price shown renders from that data, so the server stays the single source
 // of truth for money and availability.
 package site

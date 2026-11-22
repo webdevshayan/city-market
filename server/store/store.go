@@ -10,6 +10,9 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"net/url"
+	"os"
+	"strings"
 
 	_ "github.com/tursodatabase/libsql-client-go/libsql" // registers the "libsql" driver
 
@@ -28,10 +31,20 @@ type Store struct {
 }
 
 // Open connects to a Turso/libSQL database. An empty DSN returns a disabled
-// store instead of an error.
+// store instead of an error. When DATABASE_AUTH_TOKEN is set (the platform
+// token from `turso db tokens create`) it is appended to the DSN as the
+// authToken query parameter — deployment config stays two plain env vars
+// (URL + token) instead of one hand-assembled URL.
 func Open(dsn string) (*Store, error) {
 	if dsn == "" {
 		return &Store{}, nil
+	}
+	if tok := os.Getenv("DATABASE_AUTH_TOKEN"); tok != "" && !strings.Contains(dsn, "authToken=") {
+		sep := "?"
+		if strings.Contains(dsn, "?") {
+			sep = "&"
+		}
+		dsn += sep + "authToken=" + url.QueryEscape(tok)
 	}
 	db, err := sql.Open("libsql", dsn)
 	if err != nil {

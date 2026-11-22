@@ -64,7 +64,14 @@ push main ──> CI: server · tailwind · webapp · flutter
 These live in Vercel's project settings (or `vercel env add`), not in
 GitHub secrets — they configure the running deployment:
 
-- **server** project: `DATABASE_URL` (Turso), `ADMIN_TOKEN`.
+- **server** project: `DATABASE_URL` (the Turso DSN from
+  `turso db show <name> --url`), `DATABASE_AUTH_TOKEN` (from
+  `turso db tokens create <name>` — the store appends it to the DSN
+  automatically), `ADMIN_TOKEN`. Until `DATABASE_URL` is set the API serves
+  the seed fixtures and orders/admin writes return 503; `GET /healthz`
+  names the active store (`"database":"turso"` vs `"database":"seed"`) —
+  set the env and redeploy (any main push, or Re-run the workflow) to flip
+  it.
 - **web** project: `API_BASE_URL` (the server deployment's URL),
   `WEB_BASE_URL` (its own canonical domain — makes cookies `Secure` and
   drives the sitemap), `CART_SECRET` (long random string; carts reset on
@@ -75,8 +82,9 @@ GitHub secrets — they configure the running deployment:
 Each deploy job runs `vercel deploy --prod` from the project's root
 directory (`server/` or `web/`), linking by `VERCEL_ORG_ID` +
 `VERCEL_PROJECT_ID` from secrets — no committed `.vercel` directory — and
-Vercel builds remotely with the Go framework preset both `vercel.json`
-files declare. Rollbacks are Vercel-native: promote any previous
+Vercel builds remotely with each project's own recipe (server: the Go
+framework preset; web: the api/ function convention). Rollbacks are
+Vercel-native: promote any previous
 deployment from the project's Deployments tab.
 
 ## Note on pull requests

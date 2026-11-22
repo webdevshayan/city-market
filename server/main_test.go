@@ -32,13 +32,13 @@ func TestMatchEndpoints(t *testing.T) {
 		status int
 		want   string
 	}{
-		{"nearest shop at the central coords", "/api/v1/match/shop?lat=24.8607&lng=67.0011", 200, `"id":"s-central"`},
-		{"nearest available rider", "/api/v1/match/rider?lat=24.8607&lng=67.0011", 200, `"id":"r-1"`},
-		{"product-restricted shop despite distance", "/api/v1/match/shop?lat=24.8138&lng=67.0300&product=beef-1kg", 200, `"id":"s-central"`},
-		{"unknown product", "/api/v1/match/shop?lat=24.86&lng=67.00&product=nope", 404, "unknown product"},
-		{"missing coordinates", "/api/v1/match/shop", 400, "missing required query parameters"},
-		{"out-of-range latitude", "/api/v1/match/rider?lat=200&lng=67", 400, "within [-90, 90]"},
-		{"non-numeric longitude", "/api/v1/match/rider?lat=24&lng=abc", 400, "decimal degrees"},
+		{"nearest shop at the central coords", "/v1/match/shop?lat=24.8607&lng=67.0011", 200, `"id":"s-central"`},
+		{"nearest available rider", "/v1/match/rider?lat=24.8607&lng=67.0011", 200, `"id":"r-1"`},
+		{"product-restricted shop despite distance", "/v1/match/shop?lat=24.8138&lng=67.0300&product=beef-1kg", 200, `"id":"s-central"`},
+		{"unknown product", "/v1/match/shop?lat=24.86&lng=67.00&product=nope", 404, "unknown product"},
+		{"missing coordinates", "/v1/match/shop", 400, "missing required query parameters"},
+		{"out-of-range latitude", "/v1/match/rider?lat=200&lng=67", 400, "within [-90, 90]"},
+		{"non-numeric longitude", "/v1/match/rider?lat=24&lng=abc", 400, "decimal degrees"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -57,7 +57,7 @@ func TestMatchEndpoints(t *testing.T) {
 		})
 	}
 
-	resp, err := http.Get(srv.URL + "/api/v1/match/shop?lat=24.8607&lng=67.0011")
+	resp, err := http.Get(srv.URL + "/v1/match/shop?lat=24.8607&lng=67.0011")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -78,7 +78,7 @@ func TestPublicAPIRateLimited(t *testing.T) {
 	defer srv.Close()
 
 	for i := 0; i < 2; i++ {
-		resp, err := http.Get(srv.URL + "/api/v1/finance/checkout-fee")
+		resp, err := http.Get(srv.URL + "/v1/finance/checkout-fee")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -88,7 +88,7 @@ func TestPublicAPIRateLimited(t *testing.T) {
 			t.Fatalf("request %d = %d, want 200", i+1, resp.StatusCode)
 		}
 	}
-	resp, err := http.Get(srv.URL + "/api/v1/finance/checkout-fee")
+	resp, err := http.Get(srv.URL + "/v1/finance/checkout-fee")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -107,7 +107,7 @@ func TestOrderPlacementAPINoDatabase(t *testing.T) {
 	srv := httptest.NewServer(secureHeaders(newMux()))
 	defer srv.Close()
 
-	resp, err := http.Post(srv.URL+"/api/v1/orders", "application/json",
+	resp, err := http.Post(srv.URL+"/v1/orders", "application/json",
 		strings.NewReader(`{"items":[{"product_id":"beef-1kg","qty":1}],"lat":24.86,"lng":67.0}`))
 	if err != nil {
 		t.Fatal(err)
@@ -140,7 +140,7 @@ func TestOrderPlacementAPIWithDatabase(t *testing.T) {
 	defer srv.Close()
 
 	post := func(body string) (*http.Response, []byte) {
-		resp, err := http.Post(srv.URL+"/api/v1/orders", "application/json", strings.NewReader(body))
+		resp, err := http.Post(srv.URL+"/v1/orders", "application/json", strings.NewReader(body))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -167,7 +167,7 @@ func TestOrderPlacementAPIWithDatabase(t *testing.T) {
 		t.Fatalf("payout = %d, want 6000", o.RiderPayoutMinor)
 	}
 
-	resp2, err := http.Get(srv.URL + "/api/v1/orders/" + o.ID)
+	resp2, err := http.Get(srv.URL + "/v1/orders/" + o.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -202,7 +202,7 @@ func TestOrderPlacementAPIWithDatabase(t *testing.T) {
 		})
 	}
 
-	resp3, err := http.Get(srv.URL + "/api/v1/orders/ord-missing")
+	resp3, err := http.Get(srv.URL + "/v1/orders/ord-missing")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -232,7 +232,7 @@ func TestShopAndRiderOrderAPIs(t *testing.T) {
 	defer srv.Close()
 
 	place := func(body string) orders.Order {
-		resp, err := http.Post(srv.URL+"/api/v1/orders", "application/json", strings.NewReader(body))
+		resp, err := http.Post(srv.URL+"/v1/orders", "application/json", strings.NewReader(body))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -260,7 +260,7 @@ func TestShopAndRiderOrderAPIs(t *testing.T) {
 		return resp, raw
 	}
 
-	resp, raw := get("/api/v1/shop/orders?shop_id=s-central")
+	resp, raw := get("/v1/shop/orders?shop_id=s-central")
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("shop queue = %d, want 200; body %s", resp.StatusCode, raw)
 	}
@@ -272,11 +272,11 @@ func TestShopAndRiderOrderAPIs(t *testing.T) {
 		t.Fatalf("shop queue = %d orders, want >= 2", len(shopQueue))
 	}
 
-	resp, _ = get("/api/v1/rider/orders?rider_id=r-1")
+	resp, _ = get("/v1/rider/orders?rider_id=r-1")
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("rider queue = %d, want 200", resp.StatusCode)
 	}
-	resp, _ = get("/api/v1/shop/orders")
+	resp, _ = get("/v1/shop/orders")
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Fatalf("missing shop_id = %d, want 400", resp.StatusCode)
 	}
@@ -295,9 +295,9 @@ func TestShopAndRiderOrderAPIs(t *testing.T) {
 		url  string
 		want string
 	}{
-		{"/api/v1/shop/orders/" + o1.ID + "/confirm", string(orders.StatusConfirmed)},
-		{"/api/v1/rider/orders/" + o1.ID + "/pick-up", string(orders.StatusPickedUp)},
-		{"/api/v1/rider/orders/" + o1.ID + "/deliver", string(orders.StatusDelivered)},
+		{"/v1/shop/orders/" + o1.ID + "/confirm", string(orders.StatusConfirmed)},
+		{"/v1/rider/orders/" + o1.ID + "/pick-up", string(orders.StatusPickedUp)},
+		{"/v1/rider/orders/" + o1.ID + "/deliver", string(orders.StatusDelivered)},
 	}
 	for _, st := range steps {
 		t.Run(st.want, func(t *testing.T) {
@@ -316,15 +316,15 @@ func TestShopAndRiderOrderAPIs(t *testing.T) {
 	}
 
 	// A repeat or skipped step must conflict, not silently change state.
-	resp, _ = post("/api/v1/rider/orders/" + o1.ID + "/deliver")
+	resp, _ = post("/v1/rider/orders/" + o1.ID + "/deliver")
 	if resp.StatusCode != http.StatusConflict {
 		t.Fatalf("delivered → deliver again = %d, want 409", resp.StatusCode)
 	}
-	resp, _ = post("/api/v1/rider/orders/" + o2.ID + "/deliver")
+	resp, _ = post("/v1/rider/orders/" + o2.ID + "/deliver")
 	if resp.StatusCode != http.StatusConflict {
 		t.Fatalf("placed → deliver (skipped steps) = %d, want 409", resp.StatusCode)
 	}
-	resp, _ = post("/api/v1/shop/orders/ord-missing/confirm")
+	resp, _ = post("/v1/shop/orders/ord-missing/confirm")
 	if resp.StatusCode != http.StatusNotFound {
 		t.Fatalf("unknown order confirm = %d, want 404", resp.StatusCode)
 	}
@@ -337,7 +337,7 @@ func TestAdminAPIDisabledWithoutToken(t *testing.T) {
 	srv := httptest.NewServer(secureHeaders(newMux()))
 	defer srv.Close()
 
-	resp, err := http.Get(srv.URL + "/api/v1/admin/products")
+	resp, err := http.Get(srv.URL + "/v1/admin/products")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -396,35 +396,35 @@ func TestAdminAPIAuthAndUpserts(t *testing.T) {
 	}
 
 	// Wrong token → 401 (throttled by the rate limiter wrapping auth).
-	resp, _ := do("GET", "/api/v1/admin/products", "wrong-token", "")
+	resp, _ := do("GET", "/v1/admin/products", "wrong-token", "")
 	if resp.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("wrong admin token = %d, want 401", resp.StatusCode)
 	}
 
 	// Upsert a shop → dispatch serves it live.
-	resp, raw := do("PUT", "/api/v1/admin/shops/s-dha", "test-secret",
+	resp, raw := do("PUT", "/v1/admin/shops/s-dha", "test-secret",
 		`{"name":"DHA Store","lat":24.825,"lng":67.070,"active":true}`)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("upsert shop = %d, want 200; body %s", resp.StatusCode, raw)
 	}
 
-	resp, raw = do("GET", "/api/v1/match/shop?lat=24.825&lng=67.070", "", "")
+	resp, raw = do("GET", "/v1/match/shop?lat=24.825&lng=67.070", "", "")
 	if resp.StatusCode != http.StatusOK || !strings.Contains(string(raw), `"id":"s-dha"`) {
 		t.Fatalf("dispatch after admin upsert = %d %s; want s-dha", resp.StatusCode, raw)
 	}
 
 	// Upsert a product → catalog (and order service) reload live.
-	resp, raw = do("PUT", "/api/v1/admin/products/gajar-1kg", "test-secret",
+	resp, raw = do("PUT", "/v1/admin/products/gajar-1kg", "test-secret",
 		`{"name":"Gajar ka Halal Mix","category":"grocery","brand":"noor","size":"1kg","price_minor":50000,"image":"/static/img/grocery.svg","shop_id":"s-dha"}`)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("upsert product = %d, want 200; body %s", resp.StatusCode, raw)
 	}
-	resp, raw = do("GET", "/api/v1/admin/products", "test-secret", "")
+	resp, raw = do("GET", "/v1/admin/products", "test-secret", "")
 	if resp.StatusCode != http.StatusOK || !strings.Contains(string(raw), "gajar-1kg") {
 		t.Fatalf("admin product list = %d %s; want gajar-1kg (live reload)", resp.StatusCode, raw)
 	}
 
-	resp, raw = do("POST", "/api/v1/orders", "",
+	resp, raw = do("POST", "/v1/orders", "",
 		`{"items":[{"product_id":"gajar-1kg","qty":1}],"lat":24.825,"lng":67.070}`)
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("order for the new product = %d, want 201; body %s", resp.StatusCode, raw)
@@ -438,21 +438,21 @@ func TestAdminAPIAuthAndUpserts(t *testing.T) {
 	}
 
 	// Commission settlement view — 250 orders @ 700 bps on 100,000 major.
-	resp, raw = do("GET", "/api/v1/admin/commission?orders=250&sales=10000000", "test-secret", "")
+	resp, raw = do("GET", "/v1/admin/commission?orders=250&sales=10000000", "test-secret", "")
 	if resp.StatusCode != http.StatusOK || !strings.Contains(string(raw), `"commission_rate_bps":700`) || !strings.Contains(string(raw), `"commission_minor":700000`) {
 		t.Fatalf("commission = %d %s", resp.StatusCode, raw)
 	}
-	resp, _ = do("GET", "/api/v1/admin/commission?orders=abc&sales=1", "test-secret", "")
+	resp, _ = do("GET", "/v1/admin/commission?orders=abc&sales=1", "test-secret", "")
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Fatalf("commission bad input = %d, want 400", resp.StatusCode)
 	}
 
 	// Malformed admin bodies are rejected loudly.
-	resp, _ = do("PUT", "/api/v1/admin/shops/s-bad", "test-secret", `{"nope":1}`)
+	resp, _ = do("PUT", "/v1/admin/shops/s-bad", "test-secret", `{"nope":1}`)
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Fatalf("unknown admin field = %d, want 400", resp.StatusCode)
 	}
-	resp, _ = do("PUT", "/api/v1/admin/shops/s-bad", "test-secret", `{"name":"X","lat":999,"lng":0,"active":true}`)
+	resp, _ = do("PUT", "/v1/admin/shops/s-bad", "test-secret", `{"name":"X","lat":999,"lng":0,"active":true}`)
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Fatalf("admin out-of-range coords = %d, want 400", resp.StatusCode)
 	}
@@ -465,7 +465,7 @@ func TestPublicProductsAPI(t *testing.T) {
 	srv := httptest.NewServer(secureHeaders(newMux()))
 	defer srv.Close()
 
-	resp, err := http.Get(srv.URL + "/api/v1/products")
+	resp, err := http.Get(srv.URL + "/v1/products")
 	if err != nil {
 		t.Fatal(err)
 	}

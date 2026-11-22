@@ -367,7 +367,7 @@ func TestAPISourceDegradation(t *testing.T) {
 
 	ok := true
 	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/v1/products" {
+		if r.URL.Path != "/v1/products" {
 			t.Errorf("unexpected API path %q", r.URL.Path)
 		}
 		if ok {

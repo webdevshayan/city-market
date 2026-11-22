@@ -9,7 +9,7 @@ own deployment and domain).
 browser ──> web (this project, public domain)
                 │  server-side fetches only (no CORS, no browser API calls)
                 ▼
-            server (API domain): GET /api/v1/products, POST /api/v1/orders
+            server (API domain): GET /v1/products, POST /v1/orders
 ```
 
 ## What lives here
@@ -28,7 +28,7 @@ browser ──> web (this project, public domain)
 ## Architecture rules
 
 1. **No database, no business rules.** The catalog is fetched server-side
-   from the API (`GET /api/v1/products`) and cached in memory; when the API
+   from the API (`GET /v1/products`) and cached in memory; when the API
    blips the last good snapshot is served, and a never-answered API renders
    an honestly empty shop — the web app invents nothing.
 2. **No client-side API calls.** Pages and the cart POST are same-origin;

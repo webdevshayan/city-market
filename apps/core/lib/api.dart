@@ -68,7 +68,7 @@ class HttpApiClient implements ApiClient {
 
   @override
   Future<List<Product>> products() async {
-    final list = await _list('GET', '/api/v1/admin/products') as List<dynamic>;
+    final list = await _list('GET', '/v1/products') as List<dynamic>;
     return list.map((e) => Product.fromJson(e as Map<String, dynamic>)).toList();
   }
 
@@ -81,12 +81,12 @@ class HttpApiClient implements ApiClient {
       'lat': lat,
       'lng': lng,
     });
-    return Order.fromJson(await _json('POST', '/api/v1/orders', body: body) as Map<String, dynamic>);
+    return Order.fromJson(await _json('POST', '/v1/orders', body: body) as Map<String, dynamic>);
   }
 
   @override
   Future<Order> order(String id) async =>
-      Order.fromJson(await _json('GET', '/api/v1/orders/$id') as Map<String, dynamic>);
+      Order.fromJson(await _json('GET', '/v1/orders/$id') as Map<String, dynamic>);
 
   Future<List<Order>> _orders(String path) async {
     final list = await _list('GET', path) as List<dynamic>;
@@ -95,48 +95,48 @@ class HttpApiClient implements ApiClient {
 
   @override
   Future<List<Order>> shopOrders(String shopId) async =>
-      _orders('/api/v1/shop/orders?shop_id=${Uri.encodeQueryComponent(shopId)}');
+      _orders('/v1/shop/orders?shop_id=${Uri.encodeQueryComponent(shopId)}');
 
   @override
   Future<List<Order>> riderOrders(String riderId) async =>
-      _orders('/api/v1/rider/orders?rider_id=${Uri.encodeQueryComponent(riderId)}');
+      _orders('/v1/rider/orders?rider_id=${Uri.encodeQueryComponent(riderId)}');
 
   @override
   Future<Order> confirmOrder(String id) async =>
-      Order.fromJson(await _json('POST', '/api/v1/shop/orders/$id/confirm') as Map<String, dynamic>);
+      Order.fromJson(await _json('POST', '/v1/shop/orders/$id/confirm') as Map<String, dynamic>);
 
   @override
   Future<Order> pickUpOrder(String id) async =>
-      Order.fromJson(await _json('POST', '/api/v1/rider/orders/$id/pick-up') as Map<String, dynamic>);
+      Order.fromJson(await _json('POST', '/v1/rider/orders/$id/pick-up') as Map<String, dynamic>);
 
   @override
   Future<Order> deliverOrder(String id) async =>
-      Order.fromJson(await _json('POST', '/api/v1/rider/orders/$id/deliver') as Map<String, dynamic>);
+      Order.fromJson(await _json('POST', '/v1/rider/orders/$id/deliver') as Map<String, dynamic>);
 
   // ——— admin console ———
 
   @override
   Future<List<Place>> adminShops(String adminToken) async {
-    final list = await _list('GET', '/api/v1/admin/shops', adminToken: adminToken) as List<dynamic>;
+    final list = await _list('GET', '/v1/admin/shops', adminToken: adminToken) as List<dynamic>;
     return list.map((e) => Place.fromJson(e as Map<String, dynamic>)).toList();
   }
 
   @override
   Future<List<Place>> adminRiders(String adminToken) async {
-    final list = await _list('GET', '/api/v1/admin/riders', adminToken: adminToken) as List<dynamic>;
+    final list = await _list('GET', '/v1/admin/riders', adminToken: adminToken) as List<dynamic>;
     return list.map((e) => Place.fromJson(e as Map<String, dynamic>)).toList();
   }
 
   @override
   Future<List<Product>> adminProducts(String adminToken) async {
-    final list = await _list('GET', '/api/v1/admin/products', adminToken: adminToken) as List<dynamic>;
+    final list = await _list('GET', '/v1/admin/products', adminToken: adminToken) as List<dynamic>;
     return list.map((e) => Product.fromJson(e as Map<String, dynamic>)).toList();
   }
 
   @override
   Future<void> adminUpsertShop(String adminToken,
       {required String id, required String name, required double lat, required double lng, required bool active}) async {
-    await _json('PUT', '/api/v1/admin/shops/${Uri.encodeQueryComponent(id)}',
+    await _json('PUT', '/v1/admin/shops/${Uri.encodeQueryComponent(id)}',
         adminToken: adminToken,
         body: jsonEncode({'name': name, 'lat': lat, 'lng': lng, 'active': active}));
   }
@@ -144,7 +144,7 @@ class HttpApiClient implements ApiClient {
   @override
   Future<void> adminUpsertRider(String adminToken,
       {required String id, required String name, required double lat, required double lng, required bool available}) async {
-    await _json('PUT', '/api/v1/admin/riders/${Uri.encodeQueryComponent(id)}',
+    await _json('PUT', '/v1/admin/riders/${Uri.encodeQueryComponent(id)}',
         adminToken: adminToken,
         body: jsonEncode({'name': name, 'lat': lat, 'lng': lng, 'available': available}));
   }
@@ -158,7 +158,7 @@ class HttpApiClient implements ApiClient {
       required String size,
       required int priceMinor,
       required String shopId}) async {
-    await _json('PUT', '/api/v1/admin/products/${Uri.encodeQueryComponent(id)}',
+    await _json('PUT', '/v1/admin/products/${Uri.encodeQueryComponent(id)}',
         adminToken: adminToken,
         body: jsonEncode({
           'name': name,
@@ -172,7 +172,7 @@ class HttpApiClient implements ApiClient {
 
   @override
   Future<CommissionView> commission(String adminToken, {required int orders, required int salesMinor}) async {
-    final j = await _json('GET', '/api/v1/admin/commission?orders=$orders&sales=$salesMinor',
+    final j = await _json('GET', '/v1/admin/commission?orders=$orders&sales=$salesMinor',
         adminToken: adminToken) as Map<String, dynamic>;
     return CommissionView.fromJson(j);
   }
