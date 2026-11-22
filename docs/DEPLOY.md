@@ -26,9 +26,13 @@ push main ──> CI: server · tailwind · webapp · flutter
    ```
 
    With the CLI: run `vercel link` inside `server/` and then inside `web/`,
-   answering with the right project name for each. Both `vercel.json` files
-   already declare the Go framework preset; no project settings need
-   changing.
+   answering with the right project name for each. The `server` project
+   uses the Go framework preset (its `vercel.json` declares it); the `web`
+   project uses the `api/` function convention (`vercel.json` sets
+   `framework: null` — the Vercel Go runtime compiles `api/index.go` into
+   the serverless function and the rewrite routes everything to it). If a
+   project was created in the dashboard with a different framework, no
+   change is needed: each deploy's `vercel.json` takes precedence.
 
 2. Grab the IDs — after `vercel link`, each directory contains
    `.vercel/project.json` with `orgId` and `projectId` (or read them from
