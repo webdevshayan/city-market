@@ -50,7 +50,7 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
     if (t.isEmpty) return;
     setState(() {
       _tokenValue = t;
-      _stats = _load();
+      _stats = _load()..ignore();
     });
   }
 
