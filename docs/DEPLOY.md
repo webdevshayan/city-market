@@ -36,20 +36,24 @@ push main ──> CI: server · tailwind · webapp · flutter
    Team Settings). **Do not commit `.vercel/`** — it is already gitignored;
    the CI reads the IDs from secrets instead.
 
-3. Create a Vercel token: Vercel dashboard → Account Settings → Tokens →
-   scope it to the team. Then set **four repository secrets** in GitHub
-   (Settings → Secrets and variables → Actions):
+3. Create the Vercel tokens: Vercel dashboard → Account Settings → Tokens →
+   scope them to the team (one per deploy job keeps blast radius small).
+   Then set **five credentials** in GitHub (Settings → Secrets and
+   variables → Actions). Tokens belong in the **Secrets** tab; the IDs can
+   live in either tab — the workflow reads each as `vars.NAME ||
+   secrets.NAME`:
 
-   | Secret | Value |
-   | --- | --- |
-   | `VERCEL_TOKEN` | the Vercel token |
-   | `VERCEL_ORG_ID` | your Vercel org/team ID |
-   | `VERCEL_PROJECT_ID_SERVER` | project ID of the `server` project |
-   | `VERCEL_PROJECT_ID_WEB` | project ID of the `web` project |
+   | Name | Tab | Value |
+   | --- | --- | --- |
+   | `VERCEL_TOKEN_FOR_CM_SERVER` | Secrets | Vercel token used by the server deploy job |
+   | `VERCEL_TOKEN_FOR_CM_WEB` | Secrets | Vercel token used by the web deploy job |
+   | `VERCEL_ORG_ID` | Variables or Secrets | your Vercel org/team ID |
+   | `VERCEL_PROJECT_ID_SERVER` | Variables or Secrets | project ID of the `server` project |
+   | `VERCEL_PROJECT_ID_WEB` | Variables or Secrets | project ID of the `web` project |
 
-4. That's it. Until the secrets exist the deploy jobs **skip with a
-   notice** and CI stays green; the next push to `main` after setting them
-   performs the first production deploys.
+4. That's it. Until the credentials exist the deploy jobs **skip with a
+   notice** naming whatever is missing, and CI stays green; the next push
+   to `main` after setting them performs the first production deploys.
 
 ## Runtime environment (set once per Vercel project)
 
