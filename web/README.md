@@ -54,7 +54,7 @@ Cookies become `Secure` automatically when `WEB_BASE_URL` starts with
 
 Automatic: every green push to `main` deploys this app to Vercel
 production from CI (alongside the API project — see `../docs/DEPLOY.md`
-for the one-time setup: two Vercel projects, four GitHub secrets). Manual
+for the one-time setup: two Vercel projects, five credentials). Manual
 fallback, if you ever need it:
 
 ```bash

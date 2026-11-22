@@ -67,7 +67,7 @@ makes cookies `Secure`); `CART_SECRET` signs cart cookies.
 
 Deploys: the CI pipeline runs on `main` only — the four test jobs gate the
 `deploy-server` and `deploy-web` jobs that publish both Vercel projects to
-production. One-time setup (two projects, four secrets): `docs/DEPLOY.md`.
+production. One-time setup (two projects, five credentials): `docs/DEPLOY.md`.
 
 ## Install the apps
 

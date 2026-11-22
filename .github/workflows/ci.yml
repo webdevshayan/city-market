@@ -103,25 +103,34 @@ jobs:
             echo "::endgroup::"
           done
 
-  # Storage policy: no permanent heavy files. Uploads live for 1 day
   # Production deploys: both Vercel projects ship from main only, and only
-  # after every test job is green. Each deploy links by org/project ID from
-  # secrets (no committed .vercel directory) and lets Vercel build remotely
-  # with the Go framework preset each vercel.json already declares. While
-  # the secrets are unset the jobs skip with a notice — the pipeline stays
-  # green from the very first run.
+  # after every test job is green. Each deploy links by org/project ID (repo
+  # variables or secrets — no committed .vercel directory) and lets Vercel
+  # build remotely with the Go framework preset each vercel.json already
+  # declares; each job uses its own Vercel token. Credentials are read as
+  # vars.NAME || secrets.NAME, so either the Variables or the Secrets tab
+  # works. While credentials are unset the jobs skip with a notice — the
+  # pipeline stays green from the very first run.
   deploy-server:
     name: Deploy — server (API) to Vercel production
     needs: [server, web, webapp, flutter]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Guard — skip until the Vercel secrets exist
+      - name: Guard — skip until the Vercel credentials exist
         id: guard
+        env:
+          V_TOKEN: ${{ vars.VERCEL_TOKEN_FOR_CM_SERVER || secrets.VERCEL_TOKEN_FOR_CM_SERVER }}
+          V_ORG: ${{ vars.VERCEL_ORG_ID || secrets.VERCEL_ORG_ID }}
+          V_PID: ${{ vars.VERCEL_PROJECT_ID_SERVER || secrets.VERCEL_PROJECT_ID_SERVER }}
         run: |
-          if [ -z "${{ secrets.VERCEL_TOKEN }}" ] || [ -z "${{ secrets.VERCEL_ORG_ID }}" ] || [ -z "${{ secrets.VERCEL_PROJECT_ID_SERVER }}" ]; then
+          missing=""
+          if [ -z "$V_TOKEN" ]; then missing="$missing VERCEL_TOKEN_FOR_CM_SERVER"; fi
+          if [ -z "$V_ORG" ]; then missing="$missing VERCEL_ORG_ID"; fi
+          if [ -z "$V_PID" ]; then missing="$missing VERCEL_PROJECT_ID_SERVER"; fi
+          if [ -n "$missing" ]; then
             echo "skip=true" >> "$GITHUB_OUTPUT"
-            echo "::notice::Vercel secrets not set yet (VERCEL_TOKEN, VERCEL_ORG_ID, VERCEL_PROJECT_ID_SERVER) — production deploy skipped"
+            echo "::notice::Missing Vercel credentials (repo variables or secrets):$missing — production deploy skipped"
           else
             echo "skip=false" >> "$GITHUB_OUTPUT"
           fi
@@ -129,9 +138,9 @@ jobs:
         if: steps.guard.outputs.skip != 'true'
         working-directory: server
         env:
-          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
-          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID_SERVER }}
+          VERCEL_TOKEN: ${{ vars.VERCEL_TOKEN_FOR_CM_SERVER || secrets.VERCEL_TOKEN_FOR_CM_SERVER }}
+          VERCEL_ORG_ID: ${{ vars.VERCEL_ORG_ID || secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ vars.VERCEL_PROJECT_ID_SERVER || secrets.VERCEL_PROJECT_ID_SERVER }}
         run: |
           npx --yes vercel@latest deploy --prod --yes --token="$VERCEL_TOKEN"
 
@@ -141,12 +150,20 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Guard — skip until the Vercel secrets exist
+      - name: Guard — skip until the Vercel credentials exist
         id: guard
+        env:
+          V_TOKEN: ${{ vars.VERCEL_TOKEN_FOR_CM_WEB || secrets.VERCEL_TOKEN_FOR_CM_WEB }}
+          V_ORG: ${{ vars.VERCEL_ORG_ID || secrets.VERCEL_ORG_ID }}
+          V_PID: ${{ vars.VERCEL_PROJECT_ID_WEB || secrets.VERCEL_PROJECT_ID_WEB }}
         run: |
-          if [ -z "${{ secrets.VERCEL_TOKEN }}" ] || [ -z "${{ secrets.VERCEL_ORG_ID }}" ] || [ -z "${{ secrets.VERCEL_PROJECT_ID_WEB }}" ]; then
+          missing=""
+          if [ -z "$V_TOKEN" ]; then missing="$missing VERCEL_TOKEN_FOR_CM_WEB"; fi
+          if [ -z "$V_ORG" ]; then missing="$missing VERCEL_ORG_ID"; fi
+          if [ -z "$V_PID" ]; then missing="$missing VERCEL_PROJECT_ID_WEB"; fi
+          if [ -n "$missing" ]; then
             echo "skip=true" >> "$GITHUB_OUTPUT"
-            echo "::notice::Vercel secrets not set yet (VERCEL_TOKEN, VERCEL_ORG_ID, VERCEL_PROJECT_ID_WEB) — production deploy skipped"
+            echo "::notice::Missing Vercel credentials (repo variables or secrets):$missing — production deploy skipped"
           else
             echo "skip=false" >> "$GITHUB_OUTPUT"
           fi
@@ -154,12 +171,13 @@ jobs:
         if: steps.guard.outputs.skip != 'true'
         working-directory: web
         env:
-          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
-          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID_WEB }}
+          VERCEL_TOKEN: ${{ vars.VERCEL_TOKEN_FOR_CM_WEB || secrets.VERCEL_TOKEN_FOR_CM_WEB }}
+          VERCEL_ORG_ID: ${{ vars.VERCEL_ORG_ID || secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ vars.VERCEL_PROJECT_ID_WEB || secrets.VERCEL_PROJECT_ID_WEB }}
         run: |
           npx --yes vercel@latest deploy --prod --yes --token="$VERCEL_TOKEN"
 
+  # Storage policy: no permanent heavy files. Uploads live for 1 day
   # (retention-days: 1) and this job force-deletes anything older, so the
   # repository never accumulates heavy artifacts.
   cleanup:
