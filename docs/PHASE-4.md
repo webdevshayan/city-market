@@ -68,7 +68,7 @@ other packages, so `flutter pub get` resolves deterministically.
 
 ## Verification
 
-- **Local (Flutter 3.24.5 stable, real SDK in the sandbox)**:
+- **Local (Flutter 3.24.5 stable, real SDK)**:
   `flutter analyze` clean and `flutter test` green for all five packages —
   9 core unit tests + 10 widget tests (citizen 3, shop 2, rider 2, admin 3)
   covering rendering, money formatting, request shapes, error mapping, the

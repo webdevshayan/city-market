@@ -75,9 +75,9 @@ are untouched apart from the wiring they consume.
   4. Failure path: an unreachable database logs the reason and serves the
      seed fixtures at full fidelity.
 
-> Note: the uploaded `.env` carries a local `file:` DATABASE_URL. A remote
+> Note: the local `.env` carries a dev `file:` DATABASE_URL. A remote
 > `libsql://` round-trip needs real Turso credentials, which are not (and
-> should not be) in this sandbox — set `DATABASE_URL` to the Turso URL on
+> should not be) committed — set `DATABASE_URL` to the Turso URL on
 > Vercel and the same code path runs unchanged. Every DB interaction is
 > driver-swappable by design.
 

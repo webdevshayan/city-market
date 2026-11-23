@@ -46,9 +46,9 @@ release notes say so loudly:
 
 ### Owner setup (one-time): activate the release key
 
-1. Download `release-keystore.p12` and `SIGNING-README.txt` (delivered with
-   the Phase 5 handoff) and store both somewhere safe — the keystore is the
-   identity of every future release; losing it means users must reinstall.
+1. Keep `release-keystore.p12` and its passwords somewhere safe and
+   private — the keystore is the identity of every future release; losing it
+   means users must reinstall. Never commit either file.
 2. On GitHub: **Settings → Secrets and variables → Actions → New repository
    secret**, four times:
 
