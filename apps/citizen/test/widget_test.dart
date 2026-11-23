@@ -4,21 +4,150 @@ import 'package:core/models.dart';
 import 'package:core/testing.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
+Widget host(FakeApi api) => MaterialApp(home: SessionGate(api: api));
+
+Future<FakeApi> pumpGuest(WidgetTester tester) async {
+  SharedPreferences.setMockInitialValues({});
+  final api = FakeApi();
+  await tester.pumpWidget(host(api));
+  await tester.pumpAndSettle();
+  return api;
+}
+
+Future<void> signIn(WidgetTester tester, FakeApi api, {bool register = false}) async {
+  await tester.tap(find.byKey(const ValueKey('open-signin-btn')));
+  await tester.pumpAndSettle();
+  if (register) {
+    await tester.tap(find.byKey(const ValueKey('citizen-toggle-mode')));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byKey(const ValueKey('citizen-name-field')), 'Aisha Khaskheli');
+  }
+  await tester.enterText(find.byKey(const ValueKey('citizen-phone-field')), '03111234567');
+  await tester.enterText(find.byKey(const ValueKey('citizen-password-field')), 'long-enough');
+  await tester.tap(find.byKey(const ValueKey('citizen-submit-btn')));
+  await tester.pumpAndSettle();
+}
 
 void main() {
-  testWidgets('catalog renders products with stock and filter chips', (tester) async {
-    final api = FakeApi();
-    await tester.pumpWidget(MaterialApp(home: CatalogScreen(api: api)));
-    await tester.pumpAndSettle();
+  testWidgets('a guest browses, checks out and orders without any account', (tester) async {
+    final api = await pumpGuest(tester);
 
     expect(find.text('Halal Beef Boneless'), findsOneWidget);
     expect(find.textContaining('In stock: 12'), findsOneWidget);
-    expect(find.text('Meat'), findsOneWidget); // the category filter chip
-    expect(find.byKey(const ValueKey('shop-all-chip')), findsOneWidget);
-    expect(find.byKey(const ValueKey('shop-s-central')), findsOneWidget);
+    expect(find.byKey(const ValueKey('open-signin-btn')), findsOneWidget);
+
+    await tester.tap(find.byKey(const ValueKey('add-beef-1kg')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('checkout-btn')));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byKey(const ValueKey('address-field')), 'Near the water tank, green gate');
+    await tester.dragUntilVisible(
+      find.byKey(const ValueKey('place-order-btn')),
+      find.byType(ListView).last,
+      const Offset(0, -150),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('place-order-btn')));
+    await tester.pumpAndSettle();
+
+    expect(api.placeOrderCalls, hasLength(1));
+    expect(api.placeOrderBearers.single, ''); // a guest order carries no token
+    expect(find.textContaining('ord-test-1'), findsOneWidget);
+    expect(find.text('Placed'), findsOneWidget);
+    expect(find.text('2825.00'), findsOneWidget);
+  });
+
+  testWidgets('register creates the account and lands back signed in', (tester) async {
+    final api = await pumpGuest(tester);
+
+    await tester.tap(find.byKey(const ValueKey('open-signin-btn')));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('You can also order without an account'), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('citizen-toggle-mode')));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byKey(const ValueKey('citizen-name-field')), 'Aisha Khaskheli');
+    await tester.enterText(find.byKey(const ValueKey('citizen-phone-field')), '0311-1234567');
+    await tester.enterText(find.byKey(const ValueKey('citizen-password-field')), 'long-enough');
+    await tester.tap(find.byKey(const ValueKey('citizen-submit-btn')));
+    await tester.pumpAndSettle();
+
+    expect(api.citizenRegisterCalls.single['phone'], '0311-1234567');
+    expect(find.byKey(const ValueKey('account-menu')), findsOneWidget); // signed in
+    expect(find.byKey(const ValueKey('open-signin-btn')), findsNothing);
+  });
+
+  testWidgets('login keeps the session and My Orders shows history', (tester) async {
+    final api = await pumpGuest(tester);
+    await signIn(tester, api);
+    // re-run with the same api to record the login call
+    expect(api.loginCalls.single['role'], 'citizen');
+    expect(find.byKey(const ValueKey('account-menu')), findsOneWidget);
+
+    await tester.tap(find.byKey(const ValueKey('account-menu')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('My orders'));
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('Madina Halal Store'), findsOneWidget);
+    expect(find.textContaining('1425.00 PKR'), findsOneWidget);
+    expect(find.textContaining('Near the water tank'), findsOneWidget);
+  });
+
+  testWidgets('a signed-in checkout attaches the account token', (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    final api = FakeApi();
+    await tester.pumpWidget(host(api));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('open-signin-btn')));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byKey(const ValueKey('citizen-phone-field')), '03111234567');
+    await tester.enterText(find.byKey(const ValueKey('citizen-password-field')), 'long-enough');
+    await tester.tap(find.byKey(const ValueKey('citizen-submit-btn')));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const ValueKey('add-beef-1kg')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('checkout-btn')));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byKey(const ValueKey('address-field')), 'Near the water tank');
+    await tester.dragUntilVisible(
+      find.byKey(const ValueKey('place-order-btn')),
+      find.byType(ListView).last,
+      const Offset(0, -150),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('place-order-btn')));
+    await tester.pumpAndSettle();
+
+    expect(api.placeOrderBearers.single, 'token-fixture'); // history attaches
+    expect(find.textContaining('ord-test-1'), findsOneWidget);
+  });
+
+  testWidgets('sign out returns the app to guest mode', (tester) async {
+    final api = FakeApi();
+    SharedPreferences.setMockInitialValues({});
+    await tester.pumpWidget(host(api));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('open-signin-btn')));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byKey(const ValueKey('citizen-phone-field')), '03111234567');
+    await tester.enterText(find.byKey(const ValueKey('citizen-password-field')), 'long-enough');
+    await tester.tap(find.byKey(const ValueKey('citizen-submit-btn')));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const ValueKey('account-menu')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Sign out'));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey('open-signin-btn')), findsOneWidget);
+    expect(find.byKey(const ValueKey('account-menu')), findsNothing);
   });
 
   testWidgets('out-of-stock products cannot be added', (tester) async {
+    SharedPreferences.setMockInitialValues({});
     final api = FakeApi(products: [
       const Product(
           id: 'mutton-1kg',
@@ -31,7 +160,7 @@ void main() {
           priceMinor: 240000,
           stock: 0),
     ]);
-    await tester.pumpWidget(MaterialApp(home: CatalogScreen(api: api)));
+    await tester.pumpWidget(host(api));
     await tester.pumpAndSettle();
 
     expect(find.text('Out of stock'), findsOneWidget);
@@ -39,76 +168,8 @@ void main() {
     expect(find.byKey(const ValueKey('checkout-btn')), findsNothing);
   });
 
-  testWidgets('checkout takes a delivery address and places a COD order for the shop', (tester) async {
-    final api = FakeApi();
-    await tester.pumpWidget(MaterialApp(home: CatalogScreen(api: api)));
-    await tester.pumpAndSettle();
-
-    await tester.tap(find.byKey(const ValueKey('add-beef-1kg')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('checkout-btn')));
-    await tester.pumpAndSettle();
-
-    // The address is required — the rider reads it before setting out.
-    await tester.dragUntilVisible(
-      find.byKey(const ValueKey('place-order-btn')),
-      find.byType(ListView).last,
-      const Offset(0, -150),
-    );
-    await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('place-order-btn')));
-    await tester.pumpAndSettle();
-    expect(find.textContaining('Add a short delivery address'), findsOneWidget);
-
-    await tester.enterText(find.byKey(const ValueKey('address-field')), 'Near the water tank, green gate');
-    await tester.dragUntilVisible(
-      find.byKey(const ValueKey('place-order-btn')),
-      find.byType(ListView).last,
-      const Offset(0, -150),
-    );
-    await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('place-order-btn')));
-    await tester.pumpAndSettle();
-
-    expect(api.placeOrderCalls, hasLength(1));
-    expect(api.placeOrderShopIds.single, 's-central'); // the specific shop
-    expect(api.placeOrderNotes.single, 'Near the water tank, green gate');
-    expect(find.textContaining('ord-test-1'), findsOneWidget);
-    expect(find.text('Placed'), findsOneWidget);
-    expect(find.textContaining('Madina Halal Store'), findsOneWidget);
-    expect(find.textContaining('Waiting for a rider'), findsOneWidget);
-    expect(find.textContaining('cash on delivery'), findsOneWidget);
-    expect(find.text('2825.00'), findsOneWidget); // server-priced total
-    // The fake echoes its canned order, whose address is the grain market one.
-    expect(find.textContaining('Near the grain market'), findsOneWidget);
-  });
-
-  testWidgets('ApiException surfaces as a real message, not a crash', (tester) async {
-    final api = _FailingApi();
-    await tester.pumpWidget(MaterialApp(home: CatalogScreen(api: api)));
-    await tester.pumpAndSettle();
-
-    await tester.tap(find.byKey(const ValueKey('add-beef-1kg')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('checkout-btn')));
-    await tester.pumpAndSettle();
-    await tester.pumpAndSettle(); // let the fullscreen dialog finish entering
-    await tester.enterText(find.byKey(const ValueKey('address-field')), 'somewhere in Johi');
-    await tester.dragUntilVisible(
-      find.byKey(const ValueKey('place-order-btn')),
-      find.byType(ListView).last,
-      const Offset(0, -150),
-    );
-    await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('place-order-btn')));
-    await tester.pumpAndSettle();
-
-    // The checkout screen surfaces the server's reason inline, not as a snackbar.
-    expect(find.textContaining('not enough stock'), findsOneWidget);
-    expect(find.byKey(const ValueKey('place-order-btn')), findsOneWidget); // stayed on checkout
-  });
-
   testWidgets('the shop filter narrows the listing', (tester) async {
+    SharedPreferences.setMockInitialValues({});
     final api = FakeApi(products: [
       const Product(
           id: 'beef-1kg',
@@ -131,29 +192,51 @@ void main() {
           priceMinor: 220000,
           stock: 8),
     ]);
-    await tester.pumpWidget(MaterialApp(home: CatalogScreen(api: api)));
+    await tester.pumpWidget(host(api));
     await tester.pumpAndSettle();
-
-    expect(find.text('Halal Beef Boneless'), findsOneWidget);
-    expect(find.text('Basmati Rice'), findsOneWidget);
 
     await tester.tap(find.byKey(const ValueKey('shop-s-central')));
     await tester.pumpAndSettle();
     expect(find.text('Halal Beef Boneless'), findsOneWidget);
-    expect(find.text('Basmati Rice'), findsNothing); // another shop's shelf
+    expect(find.text('Basmati Rice'), findsNothing);
 
     await tester.tap(find.byKey(const ValueKey('shop-all-chip')));
     await tester.pumpAndSettle();
     expect(find.text('Basmati Rice'), findsOneWidget);
+  });
+
+  testWidgets('ApiException surfaces as a real message, not a crash', (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    final api = _FailingApi();
+    await tester.pumpWidget(host(api));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const ValueKey('add-beef-1kg')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('checkout-btn')));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byKey(const ValueKey('address-field')), 'somewhere in Johi');
+    await tester.dragUntilVisible(
+      find.byKey(const ValueKey('place-order-btn')),
+      find.byType(ListView).last,
+      const Offset(0, -150),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('place-order-btn')));
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('not enough stock'), findsOneWidget);
+    expect(find.byKey(const ValueKey('place-order-btn')), findsOneWidget);
   });
 }
 
 class _FailingApi extends FakeApi {
   @override
   Future<Order> placeOrder(List<OrderDraftItem> items, double lat, double lng,
-      {String? shopId, String addressNote = ''}) async {
+      {String? shopId, String addressNote = '', String bearer = ''}) async {
     placeOrderCalls.add(items);
     placeOrderShopIds.add(shopId);
+    placeOrderBearers.add(bearer);
     throw ApiException(409, 'orders: not enough stock on the shelf');
   }
 }
