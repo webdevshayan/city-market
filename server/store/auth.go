@@ -37,11 +37,66 @@ type RiderAccount struct {
 // ErrNotFound is returned by lookups that match no row.
 var ErrNotFound = sql.ErrNoRows
 
+// RegisterShop creates a shop row and its credentials in one transaction —
+// a registration never leaves a shop without a login or vice versa.
+// Public fields come from the SeedShop shape; the shop starts unpaid
+// (paid_through empty), so the admin's monthly mark activates ordering.
+func (s *Store) RegisterShop(sh SeedShop, phone, passwordHash string) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("store: register shop tx: %w", err)
+	}
+	defer tx.Rollback() // no-op after Commit
+	if _, err = tx.Exec(
+		`INSERT INTO shops (id, name, lat, lng, active, phone, password_hash) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		sh.ID, sh.Name, sh.Lat, sh.Lng, boolInt(sh.Active), phone, passwordHash); err != nil {
+		return fmt.Errorf("store: register shop %s: %w", sh.ID, err)
+	}
+	return tx.Commit()
+}
+
+// RegisterRider creates a rider row and its credentials in one transaction.
+func (s *Store) RegisterRider(rd SeedRider, phone, passwordHash string) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("store: register rider tx: %w", err)
+	}
+	defer tx.Rollback() // no-op after Commit
+	if _, err = tx.Exec(
+		`INSERT INTO riders (id, name, lat, lng, available, phone, password_hash) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		rd.ID, rd.Name, rd.Lat, rd.Lng, boolInt(rd.Available), phone, passwordHash); err != nil {
+		return fmt.Errorf("store: register rider %s: %w", rd.ID, err)
+	}
+	return tx.Commit()
+}
+
 // ShopByPhone loads a shop by its login phone (normalized +92…).
 func (s *Store) ShopByPhone(phone string) (ShopAccount, error) {
 	return s.scanShop(s.db.QueryRow(
 		`SELECT id, name, lat, lng, active, phone, password_hash, paid_through, payment_note
 		 FROM shops WHERE phone = ?`, phone))
+}
+
+// ShopAccounts lists every shop account (the admin's subscription view).
+func (s *Store) ShopAccounts() ([]ShopAccount, error) {
+	rows, err := s.db.Query(
+		`SELECT id, name, lat, lng, active, phone, password_hash, paid_through, payment_note FROM shops`)
+	if err != nil {
+		return nil, fmt.Errorf("store: shop accounts: %w", err)
+	}
+	defer rows.Close()
+	out := []ShopAccount{}
+	for rows.Next() {
+		var a ShopAccount
+		var active int
+		if err := rows.Scan(&a.ID, &a.Name, &a.Lat, &a.Lng, &active, &a.Phone,
+			&a.PasswordHash, &a.PaidThrough, &a.PaymentNote); err != nil {
+			return nil, fmt.Errorf("store: scan shop account: %w", err)
+		}
+		a.Active = active == 1
+		out = append(out, a)
+	}
+	return out, rows.Err()
 }
 
 // ShopByID loads one shop account by ID.
