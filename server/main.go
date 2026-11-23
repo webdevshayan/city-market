@@ -548,6 +548,7 @@ type upsertProductBody struct {
 	PriceMinor int64  `json:"price_minor"`
 	Image      string `json:"image"`
 	ShopID     string `json:"shop_id"`
+	Stock      int64  `json:"stock"`
 }
 
 // handleAdminUpsertProduct writes a catalog row and reloads the catalog
@@ -564,6 +565,7 @@ func handleAdminUpsertProduct(w http.ResponseWriter, r *http.Request) {
 	if err := dbStore.UpsertProduct(store.SeedProduct{
 		ID: r.PathValue("id"), Name: b.Name, Category: b.Category, Brand: b.Brand,
 		Size: b.Size, PriceMinor: b.PriceMinor, Image: b.Image, ShopID: b.ShopID,
+		Stock: b.Stock,
 	}); err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return

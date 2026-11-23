@@ -32,9 +32,9 @@ func TestMatchEndpoints(t *testing.T) {
 		status int
 		want   string
 	}{
-		{"nearest shop at the central coords", "/v1/match/shop?lat=24.8607&lng=67.0011", 200, `"id":"s-central"`},
-		{"nearest available rider", "/v1/match/rider?lat=24.8607&lng=67.0011", 200, `"id":"r-1"`},
-		{"product-restricted shop despite distance", "/v1/match/shop?lat=24.8138&lng=67.0300&product=beef-1kg", 200, `"id":"s-central"`},
+		{"nearest shop at Johi center", "/v1/match/shop?lat=26.6921&lng=67.6133", 200, `"id":"s-central"`},
+		{"nearest available rider", "/v1/match/rider?lat=26.6921&lng=67.6133", 200, `"id":"r-1"`},
+		{"product-restricted shop despite distance", "/v1/match/shop?lat=26.7300&lng=67.7769&product=beef-1kg", 200, `"id":"s-central"`},
 		{"unknown product", "/v1/match/shop?lat=24.86&lng=67.00&product=nope", 404, "unknown product"},
 		{"missing coordinates", "/v1/match/shop", 400, "missing required query parameters"},
 		{"out-of-range latitude", "/v1/match/rider?lat=200&lng=67", 400, "within [-90, 90]"},
@@ -57,7 +57,7 @@ func TestMatchEndpoints(t *testing.T) {
 		})
 	}
 
-	resp, err := http.Get(srv.URL + "/v1/match/shop?lat=24.8607&lng=67.0011")
+	resp, err := http.Get(srv.URL + "/v1/match/shop?lat=26.6931&lng=67.6156")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -108,7 +108,7 @@ func TestOrderPlacementAPINoDatabase(t *testing.T) {
 	defer srv.Close()
 
 	resp, err := http.Post(srv.URL+"/v1/orders", "application/json",
-		strings.NewReader(`{"items":[{"product_id":"beef-1kg","qty":1}],"lat":24.86,"lng":67.0}`))
+		strings.NewReader(`{"items":[{"product_id":"beef-1kg","qty":1}],"lat":26.69,"lng":67.61}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -149,7 +149,7 @@ func TestOrderPlacementAPIWithDatabase(t *testing.T) {
 		return resp, raw
 	}
 
-	resp, raw := post(`{"items":[{"product_id":"beef-1kg","qty":2}],"lat":24.8607,"lng":67.0011}`)
+	resp, raw := post(`{"items":[{"product_id":"beef-1kg","qty":2}],"lat":26.6931,"lng":67.6156}`)
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("place = %d, want 201; body %s", resp.StatusCode, raw)
 	}
@@ -188,10 +188,10 @@ func TestOrderPlacementAPIWithDatabase(t *testing.T) {
 		name, body string
 		want       int
 	}{
-		{"unknown product", `{"items":[{"product_id":"nope","qty":1}],"lat":24.86,"lng":67}`, 400},
-		{"multi-shop cart", `{"items":[{"product_id":"beef-1kg","qty":1},{"product_id":"rice-5kg","qty":1}],"lat":24.86,"lng":67}`, 409},
-		{"empty items", `{"items":[],"lat":24.86,"lng":67}`, 400},
-		{"bad coordinates", `{"items":[{"product_id":"beef-1kg","qty":1}],"lat":999,"lng":67}`, 400},
+		{"unknown product", `{"items":[{"product_id":"nope","qty":1}],"lat":26.69,"lng":67.61}`, 400},
+		{"multi-shop cart", `{"items":[{"product_id":"beef-1kg","qty":1},{"product_id":"rice-5kg","qty":1}],"lat":26.69,"lng":67.61}`, 409},
+		{"empty items", `{"items":[],"lat":26.69,"lng":67.61}`, 400},
+		{"bad coordinates", `{"items":[{"product_id":"beef-1kg","qty":1}],"lat":999,"lng":67.61}`, 400},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -247,8 +247,8 @@ func TestShopAndRiderOrderAPIs(t *testing.T) {
 		}
 		return o
 	}
-	o1 := place(`{"items":[{"product_id":"beef-1kg","qty":1}],"lat":24.8607,"lng":67.0011}`)
-	o2 := place(`{"items":[{"product_id":"naan-10pcs","qty":1}],"lat":24.8607,"lng":67.0011}`)
+	o1 := place(`{"items":[{"product_id":"beef-1kg","qty":1}],"lat":26.6931,"lng":67.6156}`)
+	o2 := place(`{"items":[{"product_id":"naan-10pcs","qty":1}],"lat":26.6931,"lng":67.6156}`)
 
 	get := func(url string) (*http.Response, []byte) {
 		resp, err := http.Get(srv.URL + url)
@@ -403,12 +403,12 @@ func TestAdminAPIAuthAndUpserts(t *testing.T) {
 
 	// Upsert a shop → dispatch serves it live.
 	resp, raw := do("PUT", "/v1/admin/shops/s-dha", "test-secret",
-		`{"name":"DHA Store","lat":24.825,"lng":67.070,"active":true}`)
+		`{"name":"Dadu Road Mart","lat":26.7300,"lng":67.7769,"active":true}`)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("upsert shop = %d, want 200; body %s", resp.StatusCode, raw)
 	}
 
-	resp, raw = do("GET", "/v1/match/shop?lat=24.825&lng=67.070", "", "")
+	resp, raw = do("GET", "/v1/match/shop?lat=26.7300&lng=67.7769", "", "")
 	if resp.StatusCode != http.StatusOK || !strings.Contains(string(raw), `"id":"s-dha"`) {
 		t.Fatalf("dispatch after admin upsert = %d %s; want s-dha", resp.StatusCode, raw)
 	}
@@ -425,7 +425,7 @@ func TestAdminAPIAuthAndUpserts(t *testing.T) {
 	}
 
 	resp, raw = do("POST", "/v1/orders", "",
-		`{"items":[{"product_id":"gajar-1kg","qty":1}],"lat":24.825,"lng":67.070}`)
+		`{"items":[{"product_id":"gajar-1kg","qty":1}],"lat":26.7300,"lng":67.7769}`)
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("order for the new product = %d, want 201; body %s", resp.StatusCode, raw)
 	}
