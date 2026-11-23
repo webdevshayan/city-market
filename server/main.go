@@ -193,6 +193,10 @@ func newMuxWith(apiLimit, cartLimit func(http.Handler) http.Handler) *http.Serve
 	mux.Handle("GET /v1/admin/products", apiLimit(adminAuth(http.HandlerFunc(handleAdminListProducts))))
 	mux.Handle("GET /v1/admin/commission", apiLimit(adminAuth(http.HandlerFunc(handleAdminCommission))))
 	mux.Handle("GET /v1/admin/stats", apiLimit(adminAuth(http.HandlerFunc(handleAdminStats))))
+	// Subscriptions: the manual payment bookkeeping (mark a shop paid for a
+	// month) and the per-shop table the console renders.
+	mux.Handle("PATCH /v1/admin/shops/{id}/paid", cartLimit(adminAuth(http.HandlerFunc(handleAdminPayShop))))
+	mux.Handle("GET /v1/admin/subscriptions", apiLimit(adminAuth(http.HandlerFunc(handleAdminSubscriptions))))
 	mux.Handle("PUT /v1/admin/shops/{id}", cartLimit(adminAuth(http.HandlerFunc(handleAdminUpsertShop))))
 	mux.Handle("PUT /v1/admin/riders/{id}", cartLimit(adminAuth(http.HandlerFunc(handleAdminUpsertRider))))
 	mux.Handle("PUT /v1/admin/products/{id}", cartLimit(adminAuth(http.HandlerFunc(handleAdminUpsertProduct))))
@@ -224,6 +228,7 @@ func handleAPIIndex(w http.ResponseWriter, r *http.Request) {
 			"POST /v1/rider/me | POST /v1/rider/orders/{id}/{claim,pick-up,deliver}",
 			"POST /v1/rider/orders/{id}/pick-up | /deliver",
 			"GET|PUT /v1/admin/{shops,riders,products,commission,stats} (X-Admin-Token)",
+			"PATCH /v1/admin/shops/{id}/paid | GET /v1/admin/subscriptions (X-Admin-Token)",
 		},
 	})
 }

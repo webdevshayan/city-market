@@ -33,6 +33,16 @@ type RiderEarnings struct {
 	PayoutMinor int64  `json:"payout_minor"`
 }
 
+// DailySeries is the 14-day history the admin console renders as charts:
+// one bucket per UTC day, oldest first, including empty days so the
+// timeline never skips.
+type DailySeries struct {
+	Days        []string `json:"days"`
+	Orders      []int64  `json:"orders"`
+	GMVMinor    []int64  `json:"gmv_minor"`
+	PayoutMinor []int64  `json:"payout_minor"`
+}
+
 // StatsSnapshot is GET /v1/admin/stats — everything the admin console's
 // stats view renders, computed from the live order ledger and dispatch
 // tables in one call.
@@ -51,6 +61,7 @@ type StatsSnapshot struct {
 	PlatformUjrahMinor int64            `json:"platform_ujrah_minor"`
 	Shops              []ShopSettlement `json:"shops"`
 	Riders             []RiderEarnings  `json:"riders"`
+	Series             DailySeries      `json:"series"`
 }
 
 // Stats computes the snapshot. GMV and payouts come straight from the
@@ -64,6 +75,9 @@ func (s *Service) Stats() (StatsSnapshot, error) {
 	snap := StatsSnapshot{OrdersByStatus: map[string]int64{}}
 
 	if err := s.ledgerAggregates(&snap); err != nil {
+		return StatsSnapshot{}, err
+	}
+	if err := s.dailySeries(&snap); err != nil {
 		return StatsSnapshot{}, err
 	}
 
@@ -138,6 +152,54 @@ func (s *Service) Stats() (StatsSnapshot, error) {
 		})
 	}
 	return snap, nil
+}
+
+// dailySeries buckets the last 14 UTC days of the ledger into the chart
+// series: orders per day, GMV per day (cancelled excluded), and the
+// rider payout ledger per day (delivered only). Bucketing happens in Go
+// so the SQL stays plain timestamps — no database-specific date helpers.
+func (s *Service) dailySeries(snap *StatsSnapshot) error {
+	const days = 14
+	now := time.Now().UTC()
+	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+	start := today.AddDate(0, 0, -(days - 1))
+
+	rows, err := s.db.Query(`SELECT created_at, status, total_minor, rider_payout_minor
+		FROM orders WHERE created_at >= ?`, start.Format(time.RFC3339Nano))
+	if err != nil {
+		return fmt.Errorf("orders: stats: %w", err)
+	}
+	defer rows.Close()
+
+	index := map[string]int{}
+	for i := 0; i < days; i++ {
+		day := start.AddDate(0, 0, i).Format("2006-01-02")
+		snap.Series.Days = append(snap.Series.Days, day)
+		index[day] = i
+	}
+	snap.Series.Orders = make([]int64, days)
+	snap.Series.GMVMinor = make([]int64, days)
+	snap.Series.PayoutMinor = make([]int64, days)
+	for rows.Next() {
+		var createdAt, status string
+		var total, payout int64
+		if err := rows.Scan(&createdAt, &status, &total, &payout); err != nil {
+			return fmt.Errorf("orders: stats: %w", err)
+		}
+		day := createdAt[:10] // RFC3339 starts with YYYY-MM-DD
+		i, ok := index[day]
+		if !ok {
+			continue
+		}
+		snap.Series.Orders[i]++
+		if status != string(StatusCancelled) {
+			snap.Series.GMVMinor[i] += total
+		}
+		if status == string(StatusDelivered) {
+			snap.Series.PayoutMinor[i] += payout
+		}
+	}
+	return rows.Err()
 }
 
 // ledgerAggregates fills the order-level counters: totals and money sums
