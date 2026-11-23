@@ -181,7 +181,7 @@ class FakeApi implements ApiClient {
   final CommissionView commission_;
   final AdminStats stats_;
   final ShopAccount shopAccount_;
-  final RiderAccount riderAccount_;
+  RiderAccount riderAccount_;
   final List<BoardJob> board_;
   final List<ShopSubscription> subscriptions_;
   final AuthResult auth_;
@@ -310,6 +310,15 @@ class FakeApi implements ApiClient {
   @override
   Future<void> riderSetMe(String token, {required double lat, required double lng, required bool available}) async {
     setMeCalls.add({'lat': lat, 'lng': lng, 'available': available});
+    // The real backend updates the rider row; the fake must too, or the
+    // duty banner keeps showing the stale flag after the reload.
+    riderAccount_ = RiderAccount(
+        id: riderAccount_.id,
+        name: riderAccount_.name,
+        lat: lat,
+        lng: lng,
+        available: available,
+        phone: riderAccount_.phone);
   }
 
   @override
@@ -339,8 +348,10 @@ class FakeApi implements ApiClient {
     return _withStatus(placedOrder, statusDelivered);
   }
 
-  /// Reflects the transition in the canned list, the way the real backend
+  /// Reflects a status change in the canned list, the way the real backend
   /// would — so a screen that reloads after advancing sees the new status.
+  void applyStatus(String id, String status) => _apply(id, status);
+
   void _apply(String id, String status) {
     for (var i = 0; i < orders_.length; i++) {
       if (orders_[i].id == id) {
