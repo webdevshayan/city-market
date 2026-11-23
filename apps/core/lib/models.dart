@@ -377,6 +377,23 @@ class CommissionView {
   String get rateText => '${(rateBps / 100).toStringAsFixed(1)}%';
 }
 
+/// Turns a URL slug into a readable label ("al-safwa" → "Al Safwa") — the
+/// Dart twin of the server's catalog.Display, so chips and cards label
+/// identically on both sides of the wire.
+String displaySlug(String slug) {
+  if (slug.isEmpty) {
+    return '';
+  }
+  final words = slug.replaceAll('-', ' ').split(' ');
+  for (var i = 0; i < words.length; i++) {
+    final w = words[i];
+    if (w.isNotEmpty) {
+      words[i] = '${w[0].toUpperCase()}${w.substring(1)}';
+    }
+  }
+  return words.join(' ');
+}
+
 /// Renders minor units as "major.minor" — the same convention as the
 /// server's PriceText, so both sides of the wire display identically.
 String money(int minor) =>
