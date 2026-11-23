@@ -12,6 +12,7 @@ dependencies:
   core:
     path: ../core
   latlong2: ^0.9.1
+  shared_preferences: ^2.3.3
 
 dev_dependencies:
   flutter_lints: ^4.0.0

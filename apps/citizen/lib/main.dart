@@ -4,6 +4,7 @@ import 'package:core/map.dart' as cmmap;
 import 'package:core/models.dart';
 import 'package:flutter/material.dart';
 import 'package:latlong2/latlong.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 void main() => runApp(const CityMarketCitizenApp());
 
@@ -24,7 +25,7 @@ class CityMarketCitizenApp extends StatelessWidget {
     return MaterialApp(
       title: 'City Market — Citizen',
       theme: buildCMTheme(),
-      home: CatalogScreen(
+      home: SessionGate(
         api: HttpApiClient(
           const String.fromEnvironment('API_BASE_URL', defaultValue: 'https://cmserver.vercel.app'),
         ),
@@ -33,10 +34,269 @@ class CityMarketCitizenApp extends StatelessWidget {
   }
 }
 
-class CatalogScreen extends StatefulWidget {
+/// Chooses between the guest experience and the signed-in one based on the
+/// saved bearer token. Guests keep everything except history — ordering is
+/// open to everyone, accounts only exist so history survives devices.
+class SessionGate extends StatefulWidget {
   final ApiClient api;
 
-  const CatalogScreen({super.key, required this.api});
+  const SessionGate({super.key, required this.api});
+
+  @override
+  State<SessionGate> createState() => _SessionGateState();
+}
+
+class _SessionGateState extends State<SessionGate> {
+  String? _token;
+  String _name = '';
+  bool _ready = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _restore();
+  }
+
+  Future<void> _restore() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (mounted) {
+      setState(() {
+        _token = prefs.getString('citizen_token');
+        _name = prefs.getString('citizen_name') ?? '';
+        _ready = true;
+      });
+    }
+  }
+
+  Future<void> _onSignedIn(String token, String name) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('citizen_token', token);
+    await prefs.setString('citizen_name', name);
+    setState(() {
+      _token = token;
+      _name = name;
+    });
+  }
+
+  Future<void> _onSignOut() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('citizen_token');
+    await prefs.remove('citizen_name');
+    setState(() {
+      _token = null;
+      _name = '';
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (!_ready) {
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
+    return CatalogScreen(
+      api: widget.api,
+      token: _token ?? '',
+      citizenName: _name,
+      onSignedIn: _onSignedIn,
+      onSignOut: _onSignOut,
+    );
+  }
+}
+
+/// Sign in or register as a customer. Registration needs just a name, a
+/// Pakistani mobile number and a password — no location, no shop details.
+class CitizenSignInScreen extends StatefulWidget {
+  final ApiClient api;
+  final void Function(String token, String name) onSignedIn;
+
+  const CitizenSignInScreen({super.key, required this.api, required this.onSignedIn});
+
+  @override
+  State<CitizenSignInScreen> createState() => _CitizenSignInScreenState();
+}
+
+class _CitizenSignInScreenState extends State<CitizenSignInScreen> {
+  final _phone = TextEditingController();
+  final _password = TextEditingController();
+  final _name = TextEditingController();
+  bool _registering = false;
+  bool _busy = false;
+  String? _error;
+
+  Future<void> _submit() async {
+    // Block body on purpose: an arrow closure here would return the Future.
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      final AuthResult r;
+      if (_registering) {
+        r = await widget.api.registerCitizen(
+            name: _name.text.trim(), phone: _phone.text.trim(), password: _password.text);
+      } else {
+        r = await widget.api.login(role: 'citizen', phone: _phone.text.trim(), password: _password.text);
+      }
+      final name = r.citizen?.name ?? _name.text.trim();
+      if (mounted) {
+        widget.onSignedIn(r.token, name);
+        Navigator.of(context).pop();
+      }
+    } on ApiException catch (e) {
+      if (mounted) {
+        setState(() {
+          _error = e.message;
+          _busy = false;
+        });
+      }
+      return;
+    }
+    if (mounted) {
+      setState(() => _busy = false);
+    }
+  }
+
+  @override
+  void dispose() {
+    _phone.dispose();
+    _password.dispose();
+    _name.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: Text(_registering ? 'Create your account' : 'Sign in')),
+      body: ListView(
+        padding: const EdgeInsets.all(16),
+        children: [
+          CMSectionHeader(_registering ? 'Join the market' : 'Welcome back'),
+          if (_registering)
+            TextField(
+              key: const ValueKey('citizen-name-field'),
+              controller: _name,
+              decoration: const InputDecoration(labelText: 'Your name'),
+            ),
+          if (_registering) const SizedBox(height: 12),
+          TextField(
+            key: const ValueKey('citizen-phone-field'),
+            controller: _phone,
+            keyboardType: TextInputType.phone,
+            decoration: const InputDecoration(labelText: 'Mobile number', hintText: '03001234567'),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            key: const ValueKey('citizen-password-field'),
+            controller: _password,
+            obscureText: true,
+            decoration: const InputDecoration(labelText: 'Password (8+ characters)'),
+          ),
+          if (_error != null) ...[
+            const SizedBox(height: 12),
+            Text(_error!, style: const TextStyle(color: CMColors.danger, fontWeight: FontWeight.w600)),
+          ],
+          const SizedBox(height: 16),
+          FilledButton(
+            key: const ValueKey('citizen-submit-btn'),
+            onPressed: _busy ? null : _submit,
+            child: Text(_busy ? 'Working…' : _registering ? 'Create account' : 'Sign in'),
+          ),
+          const SizedBox(height: 8),
+          TextButton(
+            key: const ValueKey('citizen-toggle-mode'),
+            onPressed: _busy
+                ? null
+                : () {
+                    setState(() {
+                      _registering = !_registering;
+                      _error = null;
+                    });
+                  },
+            child: Text(_registering ? 'Already have an account? Sign in' : 'New here? Create an account'),
+          ),
+          const SizedBox(height: 12),
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(border: Border.all(color: CMColors.hairline), color: CMColors.wash),
+            child: const Text(
+              'You can also order without an account — signing in only keeps '
+              'your order history on this number, so it follows you to a new phone.',
+              style: TextStyle(color: CMColors.inkMuted, fontSize: 13),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// The signed-in customer's order history, newest first.
+class MyOrdersScreen extends StatelessWidget {
+  final ApiClient api;
+  final String token;
+
+  const MyOrdersScreen({super.key, required this.api, required this.token});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('My orders')),
+      body: FutureBuilder<List<Order>>(
+        future: api.citizenOrders(token),
+        builder: (context, snap) {
+          if (snap.hasError) {
+            return ListView(children: [
+              const SizedBox(height: 80),
+              CMErrorRetry(error: snap.error!, onRetry: () {}),
+            ]);
+          }
+          if (!snap.hasData) {
+            return const Center(child: CircularProgressIndicator());
+          }
+          final orders = snap.data!;
+          if (orders.isEmpty) {
+            return const Center(
+                child: Text('No orders yet — your history appears here after your first checkout.'));
+          }
+          return RefreshIndicator(
+            onRefresh: () async {},
+            child: ListView(
+              children: [
+                for (final o in orders)
+                  ListTile(
+                    leading: CMStatusChip(o.status),
+                    title: Text('${o.shopName} — ${money(o.totalMinor)} PKR'),
+                    subtitle: Text(
+                        '${o.items.length} line(s) · COD'
+                        '${o.addressNote.isEmpty ? '' : ' · ${o.addressNote}'}'),
+                    onTap: () => Navigator.of(context).push(
+                        MaterialPageRoute(builder: (_) => OrderScreen(api: api, order: o))),
+                  ),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
+class CatalogScreen extends StatefulWidget {
+  final ApiClient api;
+  final String token; // empty = guest
+  final String citizenName;
+  final void Function(String token, String name) onSignedIn;
+  final VoidCallback onSignOut;
+
+  const CatalogScreen({
+    super.key,
+    required this.api,
+    required this.token,
+    required this.citizenName,
+    required this.onSignedIn,
+    required this.onSignOut,
+  });
 
   @override
   State<CatalogScreen> createState() => _CatalogScreenState();
@@ -92,7 +352,8 @@ class _CatalogScreenState extends State<CatalogScreen> {
   Future<void> _checkout() async {
     final picked = await Navigator.of(context).push<DeliveryDetails>(MaterialPageRoute(
       fullscreenDialog: true,
-      builder: (_) => CheckoutScreen(api: widget.api, products: _all, qty: Map.of(_qty)),
+      builder: (_) =>
+          CheckoutScreen(api: widget.api, products: _all, qty: Map.of(_qty), bearer: widget.token),
     ));
     if (picked == null || !mounted) {
       return;
@@ -107,7 +368,38 @@ class _CatalogScreenState extends State<CatalogScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('City Market Johi')),
+      appBar: AppBar(
+        title: const Text('City Market Johi'),
+        actions: [
+          if (widget.token.isEmpty)
+            TextButton(
+              key: const ValueKey('open-signin-btn'),
+              onPressed: () => Navigator.of(context).push(MaterialPageRoute(
+                fullscreenDialog: true,
+                builder: (_) => CitizenSignInScreen(api: widget.api, onSignedIn: widget.onSignedIn),
+              )),
+              child: const Text('Sign in'),
+            )
+          else
+            PopupMenuButton<String>(
+              key: const ValueKey('account-menu'),
+              tooltip: widget.citizenName,
+              onSelected: (v) {
+                if (v == 'orders') {
+                  Navigator.of(context).push(MaterialPageRoute(
+                      builder: (_) => MyOrdersScreen(api: widget.api, token: widget.token)));
+                } else if (v == 'signout') {
+                  widget.onSignOut();
+                }
+              },
+              itemBuilder: (_) => const [
+                PopupMenuItem(value: 'orders', child: Text('My orders')),
+                PopupMenuItem(value: 'signout', child: Text('Sign out')),
+              ],
+              icon: const Icon(Icons.account_circle_outlined),
+            ),
+        ],
+      ),
       body: RefreshIndicator(
         onRefresh: _reload,
         child: FutureBuilder<List<Product>>(
@@ -261,8 +553,10 @@ class CheckoutScreen extends StatefulWidget {
   final ApiClient api;
   final List<Product> products;
   final Map<String, int> qty;
+  final String bearer; // empty = guest order
 
-  const CheckoutScreen({super.key, required this.api, required this.products, required this.qty});
+  const CheckoutScreen(
+      {super.key, required this.api, required this.products, required this.qty, required this.bearer});
 
   @override
   State<CheckoutScreen> createState() => _CheckoutScreenState();
@@ -320,6 +614,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
           _pin.longitude,
           shopId: entry.key,
           addressNote: _address.text.trim(),
+          bearer: widget.bearer,
         );
         placed.add(o);
       }
