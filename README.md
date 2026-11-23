@@ -93,13 +93,17 @@ setup).
    project in `web/` (own module, own Vercel project and domain), reading
    the catalog from the API; the server became API-only, and the cart/CSRF
    plumbing moved into the web module as a signed-cookie cart.
-7. **The marketplace** — this phase: shop owners register and manage their
+7. **The marketplace** — merged: shop owners register and manage their
    shelves with stock, riders claim jobs from a map-first dispatch board
    with distance/ETA/payout estimates before committing, customers order
    from a specific shop with a delivery pin and cash on delivery, and the
    admin runs monthly shop subscriptions (payments received manually —
    cash/EasyPaisa/JazzCash — gate dispatch) beside daily charts. The seed
    world moved home to Johi, Dadu District, Sindh (`docs/PHASE-7.md`).
+8. **Citizen accounts** — this phase: the customer app gains optional
+   register/sign-in and order history that follows the phone, while guest
+   checkout stays fully open; the admin console remains token-only
+   (`docs/PHASE-8.md`).
 
 Each phase lands as a pull request describing what changed, how it was
 tested, and what to verify before merging.
