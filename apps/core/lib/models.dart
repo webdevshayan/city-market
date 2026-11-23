@@ -177,6 +177,22 @@ class ShopAccount {
       );
 }
 
+/// A customer's account — ordering stays open to guests; the account only
+/// exists so order history survives device changes.
+class CitizenAccount {
+  final String id;
+  final String name;
+  final String phone;
+
+  const CitizenAccount({required this.id, required this.name, required this.phone});
+
+  factory CitizenAccount.fromJson(Map<String, dynamic> j) => CitizenAccount(
+        id: j['id'] as String,
+        name: j['name'] as String? ?? '',
+        phone: j['phone'] as String? ?? '',
+      );
+}
+
 /// A rider's account.
 class RiderAccount {
   final String id;

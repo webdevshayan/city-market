@@ -40,8 +40,9 @@ class AuthResult {
   final String role;
   final ShopAccount? shop;
   final RiderAccount? rider;
+  final CitizenAccount? citizen;
 
-  const AuthResult({required this.token, required this.role, this.shop, this.rider});
+  const AuthResult({required this.token, required this.role, this.shop, this.rider, this.citizen});
 
   factory AuthResult.fromJson(Map<String, dynamic> j) => AuthResult(
         token: j['token'] as String,
@@ -52,6 +53,9 @@ class AuthResult {
         rider: j['rider'] is Map<String, dynamic>
             ? RiderAccount.fromJson(j['rider'] as Map<String, dynamic>)
             : null,
+        citizen: j['account'] is Map<String, dynamic>
+            ? CitizenAccount.fromJson(j['account'] as Map<String, dynamic>)
+            : null,
       );
 }
 
@@ -59,10 +63,13 @@ abstract class ApiClient {
   // ——— citizen ———
   Future<List<Product>> products();
   Future<Order> placeOrder(List<OrderDraftItem> items, double lat, double lng,
-      {String? shopId, String addressNote = ''});
+      {String? shopId, String addressNote = '', String bearer = ''});
+  Future<List<Order>> citizenOrders(String token);
   Future<Order> order(String id);
 
   // ——— accounts ———
+  Future<AuthResult> registerCitizen(
+      {required String name, required String phone, required String password});
   Future<AuthResult> registerShop(
       {required String name, required String phone, required String password, required double lat, required double lng});
   Future<AuthResult> registerRider(
@@ -137,7 +144,7 @@ class HttpApiClient implements ApiClient {
 
   @override
   Future<Order> placeOrder(List<OrderDraftItem> items, double lat, double lng,
-      {String? shopId, String addressNote = ''}) async {
+      {String? shopId, String addressNote = '', String bearer = ''}) async {
     final body = jsonEncode({
       'items': [
         for (final it in items) {'product_id': it.productId, 'qty': it.qty},
@@ -147,7 +154,14 @@ class HttpApiClient implements ApiClient {
       if (shopId != null && shopId.isNotEmpty) 'shop_id': shopId,
       'address_note': addressNote,
     });
-    return Order.fromJson(await _json('POST', '/v1/orders', body: body) as Map<String, dynamic>);
+    return Order.fromJson(
+        await _json('POST', '/v1/orders', body: body, bearer: bearer) as Map<String, dynamic>);
+  }
+
+  @override
+  Future<List<Order>> citizenOrders(String token) async {
+    final list = await _list('GET', '/v1/citizen/orders', bearer: token) as List<dynamic>;
+    return list.map((e) => Order.fromJson(e as Map<String, dynamic>)).toList();
   }
 
   @override
@@ -155,6 +169,14 @@ class HttpApiClient implements ApiClient {
       Order.fromJson(await _json('GET', '/v1/orders/$id') as Map<String, dynamic>);
 
   // ——— accounts ———
+
+  @override
+  Future<AuthResult> registerCitizen(
+      {required String name, required String phone, required String password}) async {
+    return AuthResult.fromJson(await _json('POST', '/v1/auth/citizen/register',
+            body: jsonEncode({'name': name, 'phone': phone, 'password': password}))
+        as Map<String, dynamic>);
+  }
 
   @override
   Future<AuthResult> registerShop(
