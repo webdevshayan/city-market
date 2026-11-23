@@ -139,6 +139,12 @@ func newMuxWith(apiLimit, cartLimit func(http.Handler) http.Handler) *http.Serve
 	mux.Handle("GET /v1/match/shop", apiLimit(http.HandlerFunc(handleMatchShop)))
 	mux.Handle("GET /v1/match/rider", apiLimit(http.HandlerFunc(handleMatchRider)))
 	mux.Handle("GET /v1/products", apiLimit(http.HandlerFunc(handlePublicProducts)))
+	// Accounts: registration and login are throttled like every other write
+	// so phone+password guessing costs the attacker the same queue as orders.
+	mux.Handle("POST /v1/auth/shop/register", cartLimit(http.HandlerFunc(handleShopRegister)))
+	mux.Handle("POST /v1/auth/rider/register", cartLimit(http.HandlerFunc(handleRiderRegister)))
+	mux.Handle("POST /v1/auth/login", cartLimit(http.HandlerFunc(handleLogin)))
+	mux.Handle("POST /v1/auth/logout", cartLimit(http.HandlerFunc(handleLogout)))
 	mux.Handle("POST /v1/orders", cartLimit(http.HandlerFunc(handlePlaceOrder)))
 	mux.Handle("GET /v1/orders/{id}", apiLimit(http.HandlerFunc(handleGetOrder)))
 	mux.Handle("GET /v1/shop/orders", apiLimit(http.HandlerFunc(handleShopOrders)))
@@ -174,6 +180,7 @@ func handleAPIIndex(w http.ResponseWriter, r *http.Request) {
 			"GET /v1/products",
 			"GET /v1/finance/{ujrah,rider,checkout-fee,simulate-month}",
 			"GET /v1/match/{shop,rider}",
+			"POST /v1/auth/{shop/register,rider/register,login,logout}",
 			"POST /v1/orders",
 			"GET /v1/orders/{id}",
 			"GET /v1/shop/orders?shop_id=… | GET /v1/rider/orders?rider_id=…",
