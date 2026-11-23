@@ -114,7 +114,7 @@ func wireDatabase() {
 	cat = p
 	dbStore = st
 	places = st
-	orderSvc = orders.NewService(cat, places, st.DB())
+	orderSvc = orders.NewService(cat, places, st.DB()).WithStock(st)
 	log.Printf("catalog, orders and dispatch data served from Turso")
 }
 
@@ -139,6 +139,15 @@ func newMuxWith(apiLimit, cartLimit func(http.Handler) http.Handler) *http.Serve
 	mux.Handle("GET /v1/match/shop", apiLimit(http.HandlerFunc(handleMatchShop)))
 	mux.Handle("GET /v1/match/rider", apiLimit(http.HandlerFunc(handleMatchRider)))
 	mux.Handle("GET /v1/products", apiLimit(http.HandlerFunc(handlePublicProducts)))
+	// Shop-owner API — bearer-token gated (server/auth); every route here is
+	// a signed-in shop acting on its own shelf and queue.
+	mux.Handle("GET /v1/shop/me", apiLimit(shopBearer(handleShopMe)))
+	mux.Handle("GET /v1/shop/products", apiLimit(shopBearer(handleShopProducts)))
+	mux.Handle("POST /v1/shop/products", cartLimit(shopBearer(handleShopCreateProduct)))
+	mux.Handle("PUT /v1/shop/products/{id}", cartLimit(shopBearer(handleShopUpdateProduct)))
+	mux.Handle("GET /v1/shop/orders", apiLimit(shopBearer(handleShopQueue)))
+	mux.Handle("POST /v1/shop/orders/{id}/accept", cartLimit(shopBearer(handleShopAccept)))
+	mux.Handle("POST /v1/shop/orders/{id}/cancel", cartLimit(shopBearer(handleShopCancel)))
 	// Accounts: registration and login are throttled like every other write
 	// so phone+password guessing costs the attacker the same queue as orders.
 	mux.Handle("POST /v1/auth/shop/register", cartLimit(http.HandlerFunc(handleShopRegister)))
@@ -147,7 +156,6 @@ func newMuxWith(apiLimit, cartLimit func(http.Handler) http.Handler) *http.Serve
 	mux.Handle("POST /v1/auth/logout", cartLimit(http.HandlerFunc(handleLogout)))
 	mux.Handle("POST /v1/orders", cartLimit(http.HandlerFunc(handlePlaceOrder)))
 	mux.Handle("GET /v1/orders/{id}", apiLimit(http.HandlerFunc(handleGetOrder)))
-	mux.Handle("GET /v1/shop/orders", apiLimit(http.HandlerFunc(handleShopOrders)))
 	mux.Handle("GET /v1/rider/orders", apiLimit(http.HandlerFunc(handleRiderOrders)))
 	mux.Handle("POST /v1/shop/orders/{id}/confirm", cartLimit(http.HandlerFunc(handleOrderTransition(orders.StatusConfirmed))))
 	mux.Handle("POST /v1/rider/orders/{id}/pick-up", cartLimit(http.HandlerFunc(handleOrderTransition(orders.StatusPickedUp))))
@@ -181,10 +189,11 @@ func handleAPIIndex(w http.ResponseWriter, r *http.Request) {
 			"GET /v1/finance/{ujrah,rider,checkout-fee,simulate-month}",
 			"GET /v1/match/{shop,rider}",
 			"POST /v1/auth/{shop/register,rider/register,login,logout}",
+			"GET /v1/shop/me | /v1/shop/products | /v1/shop/orders (Bearer shop)",
+			"POST /v1/shop/products | PUT /v1/shop/products/{id} | POST /v1/shop/orders/{id}/{accept,cancel}",
 			"POST /v1/orders",
 			"GET /v1/orders/{id}",
-			"GET /v1/shop/orders?shop_id=… | GET /v1/rider/orders?rider_id=…",
-			"POST /v1/shop/orders/{id}/confirm",
+			"GET /v1/rider/orders?rider_id=… | POST /v1/rider/orders/{id}/pick-up | /deliver",
 			"POST /v1/rider/orders/{id}/pick-up | /deliver",
 			"GET|PUT /v1/admin/{shops,riders,products,commission,stats} (X-Admin-Token)",
 		},
@@ -349,7 +358,7 @@ func handlePlaceOrder(w http.ResponseWriter, r *http.Request) {
 		return
 	case errors.Is(err, orders.ErrMultiShop),
 		errors.Is(err, orders.ErrNoShopOpen),
-		errors.Is(err, orders.ErrNoRider):
+		errors.Is(err, orders.ErrOutOfStock):
 		writeErr(w, http.StatusConflict, err.Error())
 		return
 	default:
@@ -375,11 +384,6 @@ func handleGetOrder(w http.ResponseWriter, r *http.Request) {
 	default:
 		writeErr(w, http.StatusInternalServerError, err.Error())
 	}
-}
-
-// handleShopOrders lists a shop's orders — the shop dashboard's queue.
-func handleShopOrders(w http.ResponseWriter, r *http.Request) {
-	listOrders(w, r, r.URL.Query().Get("shop_id"), "shop_id", orderSvc.ForShop)
 }
 
 // handleRiderOrders lists a rider's assigned orders.
@@ -488,9 +492,29 @@ func handleAdminListProducts(w http.ResponseWriter, r *http.Request) {
 // handlePublicProducts serves the full catalog as JSON, unauthenticated.
 // This is the read endpoint the public web app — a separate deployment on
 // its own domain — builds its shop pages from, so there is exactly one
-// source of truth for what is for sale.
+// source of truth for what is for sale. Stock is overlaid live from the
+// store (the catalog snapshot would go stale the moment a shop accepts an
+// order); without a database the seed's launch shelf is served as-is.
 func handlePublicProducts(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, cat.All())
+	list := cat.All()
+	if dbStore == nil || !dbStore.Enabled() {
+		writeJSON(w, http.StatusOK, list)
+		return
+	}
+	live, err := dbStore.StockAll()
+	if err != nil {
+		// The snapshot's numbers are still honest data — degrade quietly.
+		writeJSON(w, http.StatusOK, list)
+		return
+	}
+	out := make([]catalog.Product, len(list))
+	copy(out, list)
+	for i := range out {
+		if n, ok := live[out[i].ID]; ok {
+			out[i].Stock = n
+		}
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 type upsertShopBody struct {
