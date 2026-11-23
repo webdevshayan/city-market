@@ -1,4 +1,5 @@
 import 'package:core/api.dart';
+import 'package:core/charts.dart';
 import 'package:core/design.dart';
 import 'package:core/models.dart';
 import 'package:flutter/material.dart';
@@ -42,6 +43,7 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
   // Created only at sign-in — an eagerly-created future would fire (and, on
   // a bad token, throw unlistened) before the dashboard exists to catch it.
   Future<AdminStats>? _stats;
+  Future<List<ShopSubscription>>? _subs;
 
   Future<AdminStats> _load() => widget.api.adminStats(_tokenValue ?? '');
 
@@ -51,12 +53,16 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
     setState(() {
       _tokenValue = t;
       _stats = _load()..ignore();
+      _subs = widget.api.adminSubscriptions(t)..ignore();
     });
   }
 
   void _signOut() => setState(() => _tokenValue = null);
 
-  void _reload() => setState(() => _stats = _load());
+  void _reload() => setState(() {
+        _stats = _load();
+        _subs = widget.api.adminSubscriptions(_tokenValue ?? '');
+      });
 
   @override
   void dispose() {
@@ -259,6 +265,52 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
           const SizedBox(width: 12),
           Expanded(child: CMStatTile('Cancelled', '$cancelled')),
         ]),
+        CMDashboardCharts(series: s.series),
+        const CMSectionHeader('Shop subscriptions — payments arrive manually'),
+        FutureBuilder<List<ShopSubscription>>(
+          future: _subs,
+          builder: (context, snap) {
+            if (snap.hasError) {
+              return CMErrorRetry(
+                  error: snap.error!, onRetry: () => setState(() {
+                        _subs = widget.api.adminSubscriptions(_tokenValue ?? '');
+                      }));
+            }
+            if (!snap.hasData) {
+              return const Padding(
+                  padding: EdgeInsets.all(16), child: Center(child: CircularProgressIndicator()));
+            }
+            final rows = snap.data!;
+            if (rows.isEmpty) {
+              return const Text('No shops registered yet.',
+                  style: TextStyle(color: CMColors.inkMuted));
+            }
+            return Column(
+              children: [
+                for (final row in rows)
+                  ListTile(
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 4),
+                    leading: Icon(
+                      row.eligible ? Icons.verified_outlined : Icons.pause_circle_outline,
+                      color: row.eligible ? CMColors.green : CMColors.danger,
+                    ),
+                    title: Text(row.name),
+                    subtitle: Text(
+                      row.eligible
+                          ? 'Paid through ${row.paidThrough} · this month: ${row.monthOrders} orders, ujrah ${money(row.ujrahMinor)} PKR'
+                          : 'Not paid for this month · this month so far: ${row.monthOrders} orders, ujrah ${money(row.ujrahMinor)} PKR',
+                    ),
+                    isThreeLine: true,
+                    trailing: FilledButton(
+                      key: ValueKey('pay-${row.id}'),
+                      onPressed: () => _payShop(row),
+                      child: const Text('Mark paid'),
+                    ),
+                  ),
+              ],
+            );
+          },
+        ),
         const CMSectionHeader('Shop settlements · this month'),
         _tableHeader(const ['Shop', 'Sales', 'Ujrah', 'Net']),
         for (final sh in s.shops)
@@ -290,6 +342,64 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
         ),
       ],
     );
+  }
+
+  Future<void> _payShop(ShopSubscription row) async {
+    final monthCtrl = TextEditingController(text: _currentMonth());
+    final noteCtrl = TextEditingController(text: row.paymentNote);
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (dialogCtx) => AlertDialog(
+        title: Text('Mark ${row.name} paid'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              key: const ValueKey('pay-month'),
+              controller: monthCtrl,
+              decoration: const InputDecoration(
+                  labelText: 'Paid through month (YYYY-MM)', hintText: '2026-11'),
+              keyboardType: TextInputType.datetime,
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              key: const ValueKey('pay-note'),
+              controller: noteCtrl,
+              decoration: const InputDecoration(
+                  labelText: 'Payment note (cash / EasyPaisa / JazzCash, trx…)'),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(dialogCtx, false),
+              child: const Text('Cancel')),
+          FilledButton(
+              key: const ValueKey('pay-confirm'),
+              onPressed: () => Navigator.pop(dialogCtx, true),
+              child: const Text('Mark paid')),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    try {
+      await widget.api.adminPayShop(_tokenValue ?? '',
+          id: row.id, paidThrough: monthCtrl.text.trim(), paymentNote: noteCtrl.text.trim());
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text('${row.name} marked paid through ${monthCtrl.text.trim()} — ordering is live again.')));
+      }
+      _reload();
+    } on ApiException catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
+      }
+    }
+  }
+
+  String _currentMonth() {
+    final now = DateTime.now().toUtc();
+    return '${now.year}-${now.month.toString().padLeft(2, '0')}';
   }
 
   Widget _tableHeader(List<String> cells) => Container(

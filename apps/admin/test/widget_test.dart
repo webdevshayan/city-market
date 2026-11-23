@@ -36,8 +36,36 @@ void main() {
     expect(find.text('1 of 2'), findsWidgets);
     expect(find.text('1 of 3'), findsWidgets);
     // Settlement and earnings rows from the fixture.
-    expect(find.text('Central Market Halal Store'), findsOneWidget);
-    expect(find.text('Rider 1'), findsOneWidget);
+    expect(find.text('Madina Halal Store'), findsWidgets); // subscription row + settlement row
+    expect(find.text('Ali Raza'), findsOneWidget);
+    // The charts render from the fixture's 2-day series.
+    expect(find.text('LAST 14 DAYS — ORDERS'), findsOneWidget);
+    expect(find.text('LAST 14 DAYS — GMV (PKR)'), findsOneWidget);
+    expect(find.text('LAST 14 DAYS — RIDER PAYOUTS (PKR)'), findsOneWidget);
+  });
+
+  testWidgets('the subscription table marks a shop paid for the month', (tester) async {
+    final api = FakeApi();
+    await pump(tester, api);
+    await signIn(tester);
+
+    // The fixture row: Madina Halal Store, unpaid this month.
+    expect(find.textContaining('Not paid for this month'), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('pay-s-central')));
+    await tester.pumpAndSettle();
+
+    // The month defaults to the current one; add a payment note.
+    final month = DateTime.now().toUtc();
+    final expected = '${month.year}-${month.month.toString().padLeft(2, '0')}';
+    expect(find.byKey(const ValueKey('pay-month')), findsOneWidget);
+    await tester.enterText(find.byKey(const ValueKey('pay-note')), 'easypaisa trx 9912');
+    await tester.tap(find.byKey(const ValueKey('pay-confirm')));
+    await tester.pumpAndSettle();
+
+    expect(api.payShopCalls.single['id'], 's-central');
+    expect(api.payShopCalls.single['paid_through'], expected);
+    expect(api.payShopCalls.single['payment_note'], 'easypaisa trx 9912');
+    expect(find.textContaining('marked paid through'), findsOneWidget);
   });
 
   testWidgets('a rejected token surfaces the server message with a retry', (tester) async {
