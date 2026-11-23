@@ -153,6 +153,66 @@ func handleRiderRegister(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+type registerCitizenBody struct {
+	Name     string `json:"name"`
+	Phone    string `json:"phone"`
+	Password string `json:"password"`
+}
+
+// handleCitizenRegister creates a customer account. Ordering stays open to
+// guests; an account exists so the market can attach order history across
+// devices — nothing about checkout requires it.
+func handleCitizenRegister(w http.ResponseWriter, r *http.Request) {
+	if !requireDB(w) {
+		return
+	}
+	var b registerCitizenBody
+	if err := decodeStrict(w, r, &b); err != nil {
+		return
+	}
+	phone, err := auth.NormalizePhone(b.Phone)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	hash, err := auth.HashPassword(b.Password)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if b.Name == "" {
+		writeErr(w, http.StatusBadRequest, "citizen needs a name")
+		return
+	}
+	if _, err := dbStore.CitizenByPhone(phone); err == nil {
+		writeErr(w, http.StatusConflict, "this phone number already has an account — sign in instead")
+		return
+	}
+	id, err := newAccountID("ct-")
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if err := dbStore.RegisterCitizen(id, b.Name, phone, hash); err != nil {
+		if strings.Contains(strings.ToLower(err.Error()), "unique") {
+			writeErr(w, http.StatusConflict, "this phone number already has an account — sign in instead")
+			return
+		}
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	token, _, err := issueSession(auth.RoleCitizen, id)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]any{
+		"token":   token,
+		"role":    auth.RoleCitizen,
+		"account": map[string]any{"id": id, "name": b.Name, "phone": phone},
+	})
+}
+
 type loginBody struct {
 	Role     string `json:"role"`
 	Phone    string `json:"phone"`
@@ -207,8 +267,24 @@ func handleLogin(w http.ResponseWriter, r *http.Request) {
 			"role":    auth.RoleRider,
 			"account": map[string]any{"id": acc.ID, "name": acc.Name, "phone": acc.Phone, "available": acc.Available},
 		})
+	case auth.RoleCitizen:
+		acc, err := dbStore.CitizenByPhone(phone)
+		if err != nil || !auth.CheckPassword(acc.PasswordHash, b.Password) {
+			fail()
+			return
+		}
+		token, _, err := issueSession(auth.RoleCitizen, acc.ID)
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"token":   token,
+			"role":    auth.RoleCitizen,
+			"account": map[string]any{"id": acc.ID, "name": acc.Name, "phone": acc.Phone},
+		})
 	default:
-		writeErr(w, http.StatusBadRequest, `role must be "shop" or "rider"`)
+		writeErr(w, http.StatusBadRequest, `role must be "shop", "rider" or "citizen"`)
 	}
 }
 

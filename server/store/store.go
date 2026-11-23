@@ -128,7 +128,8 @@ CREATE TABLE IF NOT EXISTS orders (
 	created_at         TEXT NOT NULL,
 	address_note       TEXT NOT NULL DEFAULT '',
 	est_route_m        INTEGER NOT NULL DEFAULT 0,
-	claimed_at         TEXT NOT NULL DEFAULT ''
+	claimed_at         TEXT NOT NULL DEFAULT '',
+	citizen_id         TEXT NOT NULL DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS order_items (
 	order_id        TEXT NOT NULL,
@@ -143,6 +144,13 @@ CREATE TABLE IF NOT EXISTS sessions (
 	subject    TEXT NOT NULL,
 	expires_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS citizens (
+	id            TEXT PRIMARY KEY,
+	name          TEXT NOT NULL,
+	phone         TEXT NOT NULL,
+	password_hash TEXT NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_citizens_phone ON citizens(phone);
 `
 
 // migrations adds the marketplace-phase columns to databases created by an
@@ -160,6 +168,7 @@ var migrations = []string{
 	`ALTER TABLE orders ADD COLUMN address_note TEXT NOT NULL DEFAULT ''`,
 	`ALTER TABLE orders ADD COLUMN est_route_m INTEGER NOT NULL DEFAULT 0`,
 	`ALTER TABLE orders ADD COLUMN claimed_at TEXT NOT NULL DEFAULT ''`,
+	`ALTER TABLE orders ADD COLUMN citizen_id TEXT NOT NULL DEFAULT ''`,
 }
 
 // EnsureSchema creates the tables if they are missing and adds newer columns

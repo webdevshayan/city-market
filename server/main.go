@@ -174,6 +174,10 @@ func newMuxWith(apiLimit, cartLimit func(http.Handler) http.Handler) *http.Serve
 	// so phone+password guessing costs the attacker the same queue as orders.
 	mux.Handle("POST /v1/auth/shop/register", cartLimit(http.HandlerFunc(handleShopRegister)))
 	mux.Handle("POST /v1/auth/rider/register", cartLimit(http.HandlerFunc(handleRiderRegister)))
+	mux.Handle("POST /v1/auth/citizen/register", cartLimit(http.HandlerFunc(handleCitizenRegister)))
+	// Citizen history — a signed-in customer's order list; guests order
+	// without any of this.
+	mux.Handle("GET /v1/citizen/orders", apiLimit(citizenBearer(handleCitizenOrders)))
 	mux.Handle("POST /v1/auth/login", cartLimit(http.HandlerFunc(handleLogin)))
 	mux.Handle("POST /v1/auth/logout", cartLimit(http.HandlerFunc(handleLogout)))
 	mux.Handle("POST /v1/orders", cartLimit(http.HandlerFunc(handlePlaceOrder)))
@@ -219,7 +223,8 @@ func handleAPIIndex(w http.ResponseWriter, r *http.Request) {
 			"GET /v1/products",
 			"GET /v1/finance/{ujrah,rider,checkout-fee,simulate-month}",
 			"GET /v1/match/{shop,rider}",
-			"POST /v1/auth/{shop/register,rider/register,login,logout}",
+			"POST /v1/auth/{shop/register,rider/register,citizen/register,login,logout}",
+			"GET /v1/citizen/orders (Bearer citizen) — guests order without an account",
 			"GET /v1/shop/me | /v1/shop/products | /v1/shop/orders (Bearer shop)",
 			"POST /v1/shop/products | PUT /v1/shop/products/{id} | POST /v1/shop/orders/{id}/{accept,cancel}",
 			"POST /v1/orders",
@@ -382,9 +387,14 @@ func handlePlaceOrder(w http.ResponseWriter, r *http.Request) {
 	for _, it := range body.Items {
 		items = append(items, orders.Item{ProductID: it.ProductID, Qty: it.Qty})
 	}
+	citizenID, ok := citizenSubjectFor(w, r)
+	if !ok {
+		return
+	}
 	o, err := orderSvc.Place(orders.PlaceInput{
 		Items: items, Lat: body.Lat, Lng: body.Lng,
 		ShopID: body.ShopID, AddressNote: body.AddressNote,
+		CitizenID: citizenID,
 	})
 	switch {
 	case err == nil:

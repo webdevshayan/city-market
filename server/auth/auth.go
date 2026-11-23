@@ -23,8 +23,9 @@ import (
 // Roles. A shop token does not open rider endpoints and vice versa —
 // middleware enforces the exact role.
 const (
-	RoleShop  = "shop"
-	RoleRider = "rider"
+	RoleShop    = "shop"
+	RoleRider   = "rider"
+	RoleCitizen = "citizen"
 )
 
 // SessionTTL is how long a bearer token stays valid (30 days); logout
@@ -156,6 +157,12 @@ func PaidThroughCovers(paidThrough string, now time.Time) bool {
 		return false
 	}
 	return paidThrough >= CurrentMonth(now)
+}
+
+// BearerOf extracts the raw bearer token from an Authorization header,
+// empty when absent — the shared parser for required and optional auth.
+func BearerOf(r *http.Request) string {
+	return bearer(r)
 }
 
 func bearer(r *http.Request) string {
