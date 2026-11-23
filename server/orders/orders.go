@@ -67,6 +67,7 @@ var (
 	ErrNoShopOpen        = errors.New("orders: no open shop stocks these items")
 	ErrNoRider           = errors.New("orders: no rider available right now")
 	ErrBadLocation       = errors.New("orders: lat must be in [-90, 90] and lng in [-180, 180]")
+	ErrOutOfStock        = errors.New("orders: not enough stock on the shelf")
 	ErrUnknownOrder      = errors.New("orders: unknown order")
 	ErrInvalidTransition = errors.New("orders: status transition not allowed")
 	ErrBadStatus         = errors.New("orders: unknown status")
@@ -120,6 +121,14 @@ type Dispatch interface {
 	Riders() ([]match.Place, error)
 }
 
+// StockSource is the live-shelf check placement consults before writing an
+// order: a short shelf is a 409 for the citizen, not a bad surprise for the
+// shop at accept time. Optional — a Service without one accepts placement
+// against the catalog alone (dev fixtures).
+type StockSource interface {
+	HasStock(productID string, qty int64) (bool, error)
+}
+
 // Service composes catalog, dispatch and persistence. Orders are durable by
 // nature, so persistence requires a database: wire a Service only when the
 // store is enabled.
@@ -127,11 +136,18 @@ type Service struct {
 	cat      Catalog
 	dispatch Dispatch
 	db       *sql.DB
+	stock    StockSource
 }
 
 // NewService wires the order engine.
 func NewService(cat Catalog, dispatch Dispatch, db *sql.DB) *Service {
 	return &Service{cat: cat, dispatch: dispatch, db: db}
+}
+
+// WithStock attaches the live-shelf check.
+func (s *Service) WithStock(src StockSource) *Service {
+	s.stock = src
+	return s
 }
 
 // Place validates and prices the order, assigns the fulfilment shop (the
@@ -174,6 +190,21 @@ func (s *Service) Place(in PlaceInput) (Order, error) {
 		}
 		items = append(items, Item{ProductID: pid, Qty: qtys[pid], UnitPriceMinor: p.PriceMinor})
 		subtotal += p.PriceMinor * qtys[pid]
+	}
+
+	// The shelf check runs before anything is written: the citizen learns
+	// about a short shelf immediately, and the shop's accept step (which
+	// decrements atomically) never sees an impossible order.
+	if s.stock != nil {
+		for _, it := range items {
+			ok, err := s.stock.HasStock(it.ProductID, it.Qty)
+			if err != nil {
+				return Order{}, fmt.Errorf("orders: stock: %w", err)
+			}
+			if !ok {
+				return Order{}, fmt.Errorf("%w: %s", ErrOutOfStock, it.ProductID)
+			}
+		}
 	}
 
 	shops, err := s.dispatch.Shops()
