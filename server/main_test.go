@@ -157,8 +157,8 @@ func TestOrderPlacementAPIWithDatabase(t *testing.T) {
 	if err := json.Unmarshal(raw, &o); err != nil {
 		t.Fatalf("decode order: %v", err)
 	}
-	if o.Status != orders.StatusPlaced || o.ShopID != "s-central" || o.RiderID != "r-1" {
-		t.Fatalf("order = %+v", o)
+	if o.Status != orders.StatusPlaced || o.ShopID != "s-central" || o.RiderID != "" {
+		t.Fatalf("order = %+v (rider stays empty until claimed)", o)
 	}
 	if o.TotalMinor != 282500 { // 2 × 1400.00 + the 25.00 flat delivery fee
 		t.Fatalf("total = %d, want 282500", o.TotalMinor)

@@ -19,7 +19,7 @@ import (
 // shopFlowServer boots the API over an in-memory store and registers one
 // shop, returning the server and its bearer token — the base fixture for
 // every shop-API test.
-func shopFlowServer(t *testing.T) (*httptest.Server, string) {
+func shopFlowServer(t *testing.T) (*httptest.Server, string, string) {
 	t.Helper()
 	st, err := store.Open("file::memory:?cache=shared")
 	if err != nil {
@@ -36,7 +36,7 @@ func shopFlowServer(t *testing.T) (*httptest.Server, string) {
 	t.Cleanup(func() { dbStore, cat, places, orderSvc = origDB, origCat, origPlaces, origSvc })
 	dbStore = st
 	places = st
-	orderSvc = orders.NewService(cat, places, st.DB()).WithStock(st)
+	orderSvc = orders.NewService(cat, places, st.DB()).WithStock(st).WithEligibility(st)
 
 	srv := httptest.NewServer(secureHeaders(newMux()))
 	t.Cleanup(srv.Close)
@@ -50,7 +50,13 @@ func shopFlowServer(t *testing.T) (*httptest.Server, string) {
 	if token == "" {
 		t.Fatal("register must return a token")
 	}
-	return srv, token
+	// The fixture shop is paid far into the future so placement tests are
+	// not season-dependent; the gate itself has a dedicated test below.
+	shopID, _ := m["shop"].(map[string]any)["id"].(string)
+	if err := dbStore.SetShopPaid(shopID, "2099-12", "test seed"); err != nil {
+		t.Fatal(err)
+	}
+	return srv, token, shopID
 }
 
 // shopDo performs an authorized shop request and returns status + parsed body.
@@ -79,12 +85,13 @@ func shopDo(t *testing.T, srv *httptest.Server, token, method, path, body string
 }
 
 func TestShopProfileAndProductLifecycle(t *testing.T) {
-	srv, token := shopFlowServer(t)
+	srv, token, _ := shopFlowServer(t)
 
-	// Profile: a fresh shop is unpaid, so ineligible for dispatch.
+	// Profile: the fixture shop was marked paid far into the future, so it
+	// is eligible right now (the unpaid case has its own gate test).
 	code, m := shopDo(t, srv, token, "GET", "/v1/shop/me", "")
-	if code != http.StatusOK || m["eligible"] != false || m["paid_through"] != "" {
-		t.Fatalf("shop me = %d %v; want eligible=false, empty paid_through", code, m)
+	if code != http.StatusOK || m["eligible"] != true {
+		t.Fatalf("shop me = %d %v; want eligible=true after the paid mark", code, m)
 	}
 
 	// Create a product on this shop's shelf.
@@ -166,7 +173,7 @@ func rawList(t *testing.T, srv *httptest.Server, token, path string) string {
 }
 
 func TestShopAcceptDecrementsStockAndCancelRestores(t *testing.T) {
-	srv, token := shopFlowServer(t)
+	srv, token, _ := shopFlowServer(t)
 
 	// The shop lists beef at qty 5.
 	code, m := shopDo(t, srv, token, "POST", "/v1/shop/products",
@@ -256,7 +263,7 @@ func postOrder(t *testing.T, base, body string) (*http.Response, []byte) {
 }
 
 func TestShopQueueRequiresTheShopToken(t *testing.T) {
-	srv, token := shopFlowServer(t)
+	srv, token, _ := shopFlowServer(t)
 
 	// No token → 401 from the middleware.
 	resp, err := http.Get(srv.URL + "/v1/shop/orders")
@@ -288,4 +295,56 @@ func TestShopQueueRequiresTheShopToken(t *testing.T) {
 	if m["error"] != nil {
 		t.Fatalf("queue errored: %v", m)
 	}
+}
+
+func TestPaidGateBlocksUnpaidShopOrders(t *testing.T) {
+	srv, _, _ := shopFlowServer(t)
+
+	// The registered shop is paid (fixture). A second, unpaid shop must be
+	// refused at placement — the manual-subscription gate in action.
+	resp, m := postJSON(t, srv.URL+"/v1/auth/shop/register",
+		`{"name":"Unpaid Shelf","phone":"03229999999","password":"long-enough","lat":26.695,"lng":67.618}`)
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("unpaid shop register = %d", resp.StatusCode)
+	}
+	unpaidID, _ := m["shop"].(map[string]any)["id"].(string)
+	if m["shop"].(map[string]any)["eligible"] != false {
+		t.Fatal("a freshly registered shop must report eligible=false")
+	}
+	unpaidToken, _ := m["token"].(string)
+	code, m := shopDo(t, srv, unpaidToken, "GET", "/v1/shop/me", "")
+	if code != http.StatusOK || m["paid_through"] != "" || m["eligible"] != false {
+		t.Fatalf("unpaid shop me = %d %v", code, m)
+	}
+	// The listing belongs to the UNPAID shop — the shelf a citizen would
+	// hit when ordering from it.
+	code, m = shopDo(t, srv, unpaidToken, "POST", "/v1/shop/products",
+		`{"name":"Unpaid Bread","category":"bakery","brand":"barakah","size":"10pcs","price_minor":35000,"stock":10}`)
+	if code != http.StatusCreated {
+		t.Fatalf("unpaid shop product create = %d %v", code, m)
+	}
+	pid, _ := m["id"].(string)
+
+	// Auto mode (the citizen did not name a shop) refuses generically —
+	// the engine just finds no eligible shop stocking the items.
+	if errStr := orderError(t, srv.URL, `{"items":[{"product_id":"`+pid+`","qty":1}],"lat":26.695,"lng":67.618}`); errStr == "" {
+		t.Fatal("placement against an unpaid shop must be refused")
+	}
+
+	// Naming the unpaid shop explicitly is the same refusal.
+	if errStr := orderError(t, srv.URL, `{"items":[{"product_id":"`+pid+`","qty":1}],"lat":26.695,"lng":67.618,"shop_id":"`+unpaidID+`"}`); !strings.Contains(errStr, "not taking orders") {
+		t.Fatalf("explicit unpaid shop must be refused, got %q", errStr)
+	}
+}
+
+// orderError places an order expected to fail and returns the server's error string.
+func orderError(t *testing.T, base, body string) string {
+	t.Helper()
+	_, raw := postOrder(t, base, body)
+	var m map[string]any
+	if err := json.Unmarshal(raw, &m); err != nil {
+		t.Fatalf("decode error body: %v (%s)", err, raw)
+	}
+	e, _ := m["error"].(string)
+	return e
 }

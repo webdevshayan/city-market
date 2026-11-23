@@ -59,6 +59,23 @@ func (seedPlaces) Shops() ([]match.Place, error) {
 	return out, nil
 }
 
+// EligibleShops adapts the launch fixtures for the paid-shop gate; the
+// seed mode never places orders (orders require the database), so every
+// active fixture shop counts.
+func (seedPlaces) EligibleShops() ([]match.Place, error) {
+	all, err := seedPlaces{}.Shops()
+	if err != nil {
+		return nil, err
+	}
+	var out []match.Place
+	for _, s := range all {
+		if s.Active {
+			out = append(out, s)
+		}
+	}
+	return out, nil
+}
+
 func (seedPlaces) Riders() ([]match.Place, error) {
 	src := store.SeedRiders()
 	out := make([]match.Place, len(src))
@@ -114,7 +131,7 @@ func wireDatabase() {
 	cat = p
 	dbStore = st
 	places = st
-	orderSvc = orders.NewService(cat, places, st.DB()).WithStock(st)
+	orderSvc = orders.NewService(cat, places, st.DB()).WithStock(st).WithEligibility(st)
 	log.Printf("catalog, orders and dispatch data served from Turso")
 }
 
@@ -324,8 +341,10 @@ type placeOrderBody struct {
 		ProductID string `json:"product_id"`
 		Qty       int64  `json:"qty"`
 	} `json:"items"`
-	Lat float64 `json:"lat"`
-	Lng float64 `json:"lng"`
+	Lat         float64 `json:"lat"`
+	Lng         float64 `json:"lng"`
+	ShopID      string  `json:"shop_id"`
+	AddressNote string  `json:"address_note"`
 }
 
 // handlePlaceOrder is the citizen checkout: priced with the finance engine,
@@ -347,17 +366,23 @@ func handlePlaceOrder(w http.ResponseWriter, r *http.Request) {
 	for _, it := range body.Items {
 		items = append(items, orders.Item{ProductID: it.ProductID, Qty: it.Qty})
 	}
-	o, err := orderSvc.Place(orders.PlaceInput{Items: items, Lat: body.Lat, Lng: body.Lng})
+	o, err := orderSvc.Place(orders.PlaceInput{
+		Items: items, Lat: body.Lat, Lng: body.Lng,
+		ShopID: body.ShopID, AddressNote: body.AddressNote,
+	})
 	switch {
 	case err == nil:
 	case errors.Is(err, orders.ErrEmptyOrder),
 		errors.Is(err, orders.ErrBadQty),
 		errors.Is(err, orders.ErrBadLocation),
-		errors.Is(err, orders.ErrUnknownProduct):
+		errors.Is(err, orders.ErrUnknownProduct),
+		errors.Is(err, orders.ErrBadAddress):
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	case errors.Is(err, orders.ErrMultiShop),
 		errors.Is(err, orders.ErrNoShopOpen),
+		errors.Is(err, orders.ErrShopMismatch),
+		errors.Is(err, orders.ErrShopUnavailable),
 		errors.Is(err, orders.ErrOutOfStock):
 		writeErr(w, http.StatusConflict, err.Error())
 		return

@@ -32,10 +32,16 @@ func TestStatsSnapshot(t *testing.T) {
 
 	// Two delivered orders (s-central beef, s-north rice), one left placed
 	// (GMV yes, payout no) and one cancelled (excluded from money entirely).
-	// All fixtures come from orders_test.go — r-3 sits on s-central but is
-	// off duty, so Place assigns r-1 everywhere here.
+	// Riders claim jobs from the dispatch board now, so the test assigns
+	// both delivered orders to r-1 directly — the payout ledger shape the
+	// view reads is unchanged.
 	o1 := deliverOne(t, svc, "beef-1kg", 2, 24.8610, 67.0011)
 	o2 := deliverOne(t, svc, "rice-5kg", 1, 24.8610, 67.0011)
+	for _, id := range []string{o1.ID, o2.ID} {
+		if _, err := svc.db.Exec(`UPDATE orders SET rider_id = 'r-1' WHERE id = ?`, id); err != nil {
+			t.Fatalf("assign rider: %v", err)
+		}
+	}
 	o3, err := svc.Place(PlaceInput{
 		Items: []Item{{ProductID: "beef-1kg", Qty: 1}}, Lat: 24.8610, Lng: 67.0011,
 	})
