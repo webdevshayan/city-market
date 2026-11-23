@@ -159,7 +159,7 @@ func reloadCatalog() {
 		return
 	}
 	cat = p
-	orderSvc = orders.NewService(cat, places, dbStore.DB()).WithStock(dbStore)
+	orderSvc = orders.NewService(cat, places, dbStore.DB()).WithStock(dbStore).WithEligibility(dbStore)
 }
 
 // handleShopQueue lists the signed-in shop's orders, newest first — the

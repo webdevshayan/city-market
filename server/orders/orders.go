@@ -65,8 +65,10 @@ var (
 	ErrUnknownProduct    = errors.New("orders: unknown product")
 	ErrMultiShop         = errors.New("orders: items span multiple shops — split orders are not supported yet")
 	ErrNoShopOpen        = errors.New("orders: no open shop stocks these items")
-	ErrNoRider           = errors.New("orders: no rider available right now")
+	ErrShopUnavailable   = errors.New("orders: that shop is not taking orders this month")
+	ErrShopMismatch      = errors.New("orders: the selected shop does not stock these items")
 	ErrBadLocation       = errors.New("orders: lat must be in [-90, 90] and lng in [-180, 180]")
+	ErrBadAddress        = errors.New("orders: address note must be at most 300 characters")
 	ErrOutOfStock        = errors.New("orders: not enough stock on the shelf")
 	ErrUnknownOrder      = errors.New("orders: unknown order")
 	ErrInvalidTransition = errors.New("orders: status transition not allowed")
@@ -101,13 +103,19 @@ type Order struct {
 	Lat              float64   `json:"lat"`
 	Lng              float64   `json:"lng"`
 	CreatedAt        time.Time `json:"created_at"`
+	AddressNote      string    `json:"address_note"`
 }
 
-// PlaceInput is the citizen's order request.
+// PlaceInput is the citizen's order request. ShopID is the citizen picking
+// a specific shop ("I want this from that shop"); empty means the engine
+// picks the nearest eligible one stocking the items. AddressNote is the
+// human-readable delivery address the rider sees alongside the pin.
 type PlaceInput struct {
-	Items []Item
-	Lat   float64
-	Lng   float64
+	Items       []Item
+	Lat         float64
+	Lng         float64
+	ShopID      string
+	AddressNote string
 }
 
 // Catalog is the slice of the catalog provider the service needs.
@@ -129,14 +137,23 @@ type StockSource interface {
 	HasStock(productID string, qty int64) (bool, error)
 }
 
+// Eligibility supplies the shops currently allowed to receive orders —
+// open AND paid through the running month (the admin marks each payment
+// manually). Optional; without it every dispatch-active shop counts as
+// eligible, which is what the dev fixtures want.
+type Eligibility interface {
+	EligibleShops() ([]match.Place, error)
+}
+
 // Service composes catalog, dispatch and persistence. Orders are durable by
 // nature, so persistence requires a database: wire a Service only when the
 // store is enabled.
 type Service struct {
-	cat      Catalog
-	dispatch Dispatch
-	db       *sql.DB
-	stock    StockSource
+	cat         Catalog
+	dispatch    Dispatch
+	db          *sql.DB
+	stock       StockSource
+	eligibility Eligibility
 }
 
 // NewService wires the order engine.
@@ -147,6 +164,12 @@ func NewService(cat Catalog, dispatch Dispatch, db *sql.DB) *Service {
 // WithStock attaches the live-shelf check.
 func (s *Service) WithStock(src StockSource) *Service {
 	s.stock = src
+	return s
+}
+
+// WithEligibility attaches the paid-shop filter.
+func (s *Service) WithEligibility(src Eligibility) *Service {
+	s.eligibility = src
 	return s
 }
 
@@ -207,31 +230,49 @@ func (s *Service) Place(in PlaceInput) (Order, error) {
 		}
 	}
 
-	shops, err := s.dispatch.Shops()
+	if len(in.AddressNote) > 300 {
+		return Order{}, ErrBadAddress
+	}
+
+	shops, err := s.eligibleShops()
 	if err != nil {
 		return Order{}, fmt.Errorf("orders: dispatch source: %w", err)
-	}
-	var candidates []match.Place
-	for _, sh := range shops {
-		if sh.ID == shopID && sh.Active {
-			candidates = append(candidates, sh)
-		}
 	}
 	origin := match.Point{Lat: in.Lat, Lng: in.Lng}
-	shop, _, err := match.Nearest(origin, candidates)
-	if err != nil {
-		return Order{}, ErrNoShopOpen
+	var shop match.Place
+	if in.ShopID != "" {
+		// The citizen picked the shop: every item must belong to it, and the
+		// shop must currently be eligible (open, paid through this month).
+		if shopID != in.ShopID {
+			return Order{}, fmt.Errorf("%w: %s", ErrShopMismatch, in.ShopID)
+		}
+		found := false
+		for _, sh := range shops {
+			if sh.ID == in.ShopID {
+				shop, found = sh, true
+				break
+			}
+		}
+		if !found {
+			return Order{}, fmt.Errorf("%w: %s", ErrShopUnavailable, in.ShopID)
+		}
+	} else {
+		var candidates []match.Place
+		for _, sh := range shops {
+			if sh.ID == shopID {
+				candidates = append(candidates, sh)
+			}
+		}
+		var err error
+		shop, _, err = match.Nearest(origin, candidates)
+		if err != nil {
+			return Order{}, ErrNoShopOpen
+		}
 	}
 
-	riders, err := s.dispatch.Riders()
-	if err != nil {
-		return Order{}, fmt.Errorf("orders: dispatch source: %w", err)
-	}
-	rider, _, err := match.Nearest(shop.Pos, riders)
-	if err != nil {
-		return Order{}, ErrNoRider
-	}
-
+	// The payout on a placed order is provisional (the shop→customer route
+	// estimate); the rider's claim recomputes it over the actual route and
+	// locks the ledger entry.
 	km := int64(match.HaversineMeters(shop.Pos, origin) / 1000)
 	payout, _, _, err := finance.RiderPayoutMinor(1, km)
 	if err != nil {
@@ -248,8 +289,8 @@ func (s *Service) Place(in PlaceInput) (Order, error) {
 		Status:           StatusPlaced,
 		ShopID:           shop.ID,
 		ShopName:         shop.Name,
-		RiderID:          rider.ID,
-		RiderName:        rider.Name,
+		RiderID:          "",
+		RiderName:        "",
 		Items:            items,
 		SubtotalMinor:    subtotal,
 		DeliveryFeeMinor: deliveryFee,
@@ -258,11 +299,21 @@ func (s *Service) Place(in PlaceInput) (Order, error) {
 		Lat:              in.Lat,
 		Lng:              in.Lng,
 		CreatedAt:        time.Now().UTC(),
+		AddressNote:      in.AddressNote,
 	}
 	if err := s.insert(o); err != nil {
 		return Order{}, fmt.Errorf("orders: persist: %w", err)
 	}
 	return o, nil
+}
+
+// eligibleShops prefers the paid-shop source; without one, every
+// dispatch-active shop counts (the fixture path).
+func (s *Service) eligibleShops() ([]match.Place, error) {
+	if s.eligibility != nil {
+		return s.eligibility.EligibleShops()
+	}
+	return s.dispatch.Shops()
 }
 
 // ByID loads one order by its ID.
@@ -314,10 +365,10 @@ func (s *Service) insert(o Order) error {
 	defer tx.Rollback() // no-op after Commit
 	if _, err = tx.Exec(
 		`INSERT INTO orders (id, status, shop_id, rider_id, subtotal_minor, delivery_fee_minor,
-		 total_minor, rider_payout_minor, lat, lng, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		 total_minor, rider_payout_minor, lat, lng, created_at, address_note)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		o.ID, string(o.Status), o.ShopID, o.RiderID, o.SubtotalMinor, o.DeliveryFeeMinor,
-		o.TotalMinor, o.RiderPayoutMinor, o.Lat, o.Lng, o.CreatedAt.Format(time.RFC3339Nano)); err != nil {
+		o.TotalMinor, o.RiderPayoutMinor, o.Lat, o.Lng, o.CreatedAt.Format(time.RFC3339Nano), o.AddressNote); err != nil {
 		return err
 	}
 	for _, it := range o.Items {
@@ -333,7 +384,7 @@ func (s *Service) insert(o Order) error {
 const (
 	orderCols = `o.id, o.status, o.shop_id, COALESCE(sh.name, o.shop_id), o.rider_id,
 		COALESCE(rd.name, o.rider_id), o.subtotal_minor, o.delivery_fee_minor, o.total_minor,
-		o.rider_payout_minor, o.lat, o.lng, o.created_at`
+		o.rider_payout_minor, o.lat, o.lng, o.created_at, o.address_note`
 	// Names come from the live shops/riders tables so admin renames are
 	// reflected without rewriting orders.
 	orderFrom = ` FROM orders o
@@ -346,7 +397,7 @@ func scanOrder(row interface{ Scan(...any) error }) (Order, error) {
 	var status, createdAt string
 	if err := row.Scan(&o.ID, &status, &o.ShopID, &o.ShopName, &o.RiderID, &o.RiderName,
 		&o.SubtotalMinor, &o.DeliveryFeeMinor, &o.TotalMinor, &o.RiderPayoutMinor,
-		&o.Lat, &o.Lng, &createdAt); err != nil {
+		&o.Lat, &o.Lng, &createdAt, &o.AddressNote); err != nil {
 		return Order{}, err
 	}
 	o.Status = Status(status)

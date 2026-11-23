@@ -19,6 +19,7 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"time"
 
 	_ "github.com/tursodatabase/libsql-client-go/libsql" // registers the "libsql" driver
 
@@ -318,6 +319,34 @@ func (s *Store) Shops() ([]match.Place, error) {
 		}
 		p.Pos = match.Point{Lat: lat, Lng: lng}
 		p.Active = active == 1
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
+// EligibleShops lists the shops currently allowed to receive orders:
+// open AND paid through the running month (paid_through "YYYY-MM" covers
+// now). This is the subscription gate placement consults.
+func (s *Store) EligibleShops() ([]match.Place, error) {
+	if !s.Enabled() {
+		return nil, ErrDisabled
+	}
+	month := time.Now().UTC().Format("2006-01")
+	rows, err := s.db.Query(
+		`SELECT id, name, lat, lng FROM shops WHERE active = 1 AND paid_through >= ?`, month)
+	if err != nil {
+		return nil, fmt.Errorf("store: eligible shops: %w", err)
+	}
+	defer rows.Close()
+	var out []match.Place
+	for rows.Next() {
+		var p match.Place
+		var lat, lng float64
+		if err := rows.Scan(&p.ID, &p.Name, &lat, &lng); err != nil {
+			return nil, fmt.Errorf("store: scan eligible shop: %w", err)
+		}
+		p.Pos = match.Point{Lat: lat, Lng: lng}
+		p.Active = true
 		out = append(out, p)
 	}
 	return out, rows.Err()

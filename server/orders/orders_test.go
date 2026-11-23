@@ -2,6 +2,7 @@ package orders
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	// Registers the "libsql" driver (same one production uses) plus a pure-Go
@@ -87,9 +88,10 @@ func TestPlaceHappyPath(t *testing.T) {
 	if o.ShopID != "s-central" || o.ShopName != "Central Market Halal Store" {
 		t.Fatalf("shop = %s/%s, want s-central", o.ShopID, o.ShopName)
 	}
-	// r-3 sits at the shop but is off duty — the nearest AVAILABLE rider is r-1.
-	if o.RiderID != "r-1" {
-		t.Fatalf("rider = %q, want r-1 (inactive riders are skipped)", o.RiderID)
+	// Riders are claimed from the dispatch board now — placement never
+	// assigns one, so the field stays empty until a claim.
+	if o.RiderID != "" {
+		t.Fatalf("rider = %q, want empty at placement (claim assigns)", o.RiderID)
 	}
 	if o.SubtotalMinor != 2*140000 {
 		t.Fatalf("subtotal = %d, want %d (price snapshot)", o.SubtotalMinor, 2*140000)
@@ -176,15 +178,83 @@ func TestPlaceNoOpenShop(t *testing.T) {
 	}
 }
 
-func TestPlaceNoRiderAvailable(t *testing.T) {
-	d := fixtureDispatch()
-	for i := range d.riders {
-		d.riders[i].Active = false
+// fakeEligibility decides which shops may receive orders this month.
+type fakeEligibility struct{ ids []string }
+
+func (f fakeEligibility) EligibleShops() ([]match.Place, error) {
+	var out []match.Place
+	for _, p := range fixtureDispatch().shops {
+		for _, id := range f.ids {
+			if p.ID == id {
+				out = append(out, p)
+			}
+		}
 	}
-	s := testService(t, fixtureCat(), d)
+	return out, nil
+}
+
+func TestPlacePaidShopGate(t *testing.T) {
+	// No shop is paid → placement is refused even though shelves are open.
+	s := testService(t, fixtureCat(), fixtureDispatch()).WithEligibility(fakeEligibility{})
+	// Auto mode with an empty eligible list is the plain no-shop refusal —
+	// the citizen never named a shop, so the message stays generic.
 	_, err := s.Place(PlaceInput{Items: []Item{{ProductID: "beef-1kg", Qty: 1}}, Lat: 24.86, Lng: 67.00})
-	if !errors.Is(err, ErrNoRider) {
-		t.Fatalf("want ErrNoRider, got %v", err)
+	if !errors.Is(err, ErrNoShopOpen) {
+		t.Fatalf("want ErrNoShopOpen, got %v", err)
+	}
+
+	// The citizen naming an unpaid shop gets the same refusal.
+	_, err = s.Place(PlaceInput{Items: []Item{{ProductID: "beef-1kg", Qty: 1}}, Lat: 24.86, Lng: 67.00, ShopID: "s-central"})
+	if !errors.Is(err, ErrShopUnavailable) {
+		t.Fatalf("explicit unpaid shop: want ErrShopUnavailable, got %v", err)
+	}
+
+	// Once the admin marks the month paid, both paths work.
+	s2 := testService(t, fixtureCat(), fixtureDispatch()).WithEligibility(fakeEligibility{ids: []string{"s-central"}})
+	o, err := s2.Place(PlaceInput{Items: []Item{{ProductID: "beef-1kg", Qty: 1}}, Lat: 24.86, Lng: 67.00})
+	if err != nil {
+		t.Fatalf("paid auto pick: %v", err)
+	}
+	if o.ShopID != "s-central" {
+		t.Fatalf("shop = %q, want s-central", o.ShopID)
+	}
+	o2, err := s2.Place(PlaceInput{Items: []Item{{ProductID: "beef-1kg", Qty: 1}}, Lat: 24.86, Lng: 67.00, ShopID: "s-central"})
+	if err != nil || o2.ShopID != "s-central" {
+		t.Fatalf("paid explicit pick: %v (%+v)", err, o2)
+	}
+}
+
+func TestPlaceExplicitShopMismatch(t *testing.T) {
+	s := testService(t, fixtureCat(), fixtureDispatch())
+	// beef lives at s-central; naming s-north is a mismatch, not a silent
+	// reassignment to whatever the customer said.
+	_, err := s.Place(PlaceInput{
+		Items: []Item{{ProductID: "beef-1kg", Qty: 1}}, Lat: 24.86, Lng: 67.00, ShopID: "s-north"})
+	if !errors.Is(err, ErrShopMismatch) {
+		t.Fatalf("want ErrShopMismatch, got %v", err)
+	}
+}
+
+func TestPlaceKeepsAddressNote(t *testing.T) {
+	s := testService(t, fixtureCat(), fixtureDispatch())
+	o, err := s.Place(PlaceInput{
+		Items: []Item{{ProductID: "beef-1kg", Qty: 1}}, Lat: 24.86, Lng: 67.00,
+		AddressNote: "House near the water tank, green gate, ring the bell twice",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.ByID(o.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.AddressNote != o.AddressNote || got.AddressNote == "" {
+		t.Fatalf("address note = %q, want it persisted verbatim", got.AddressNote)
+	}
+	if _, err := s.Place(PlaceInput{
+		Items: []Item{{ProductID: "beef-1kg", Qty: 1}}, Lat: 24.86, Lng: 67.00,
+		AddressNote: strings.Repeat("x", 301)}); !errors.Is(err, ErrBadAddress) {
+		t.Fatalf("over-long note: want ErrBadAddress, got %v", err)
 	}
 }
 
@@ -251,12 +321,14 @@ func TestForShopAndForRider(t *testing.T) {
 	if len(shopOrders) != 3 {
 		t.Fatalf("shop orders = %d, want 3", len(shopOrders))
 	}
+	// No rider is assigned at placement — the board claim does that — so
+	// the rider's list stays empty until the dispatch phase claims jobs.
 	riderOrders, err := s.ForRider("r-1")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(riderOrders) != 3 {
-		t.Fatalf("rider orders = %d, want 3", len(riderOrders))
+	if len(riderOrders) != 0 {
+		t.Fatalf("rider orders = %d, want 0 before any claim", len(riderOrders))
 	}
 	if empty, _ := s.ForShop("s-north"); len(empty) != 0 {
 		t.Fatal("other shops must see no orders")
