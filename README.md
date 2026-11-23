@@ -89,10 +89,17 @@ setup).
    shared API client, backed by the orders/admin JSON API.
 5. **APK releases** — merged: every change to `main` ships all four
    apps as a versioned GitHub Release (`docs/RELEASES.md`).
-6. **The split** — this phase: the public web moves to a standalone Go
+6. **The split** — merged: the public web moved to a standalone Go
    project in `web/` (own module, own Vercel project and domain), reading
-   the catalog from the API; the server becomes API-only, and the cart/CSRF
-   plumbing moves into the web module as a signed-cookie cart.
+   the catalog from the API; the server became API-only, and the cart/CSRF
+   plumbing moved into the web module as a signed-cookie cart.
+7. **The marketplace** — this phase: shop owners register and manage their
+   shelves with stock, riders claim jobs from a map-first dispatch board
+   with distance/ETA/payout estimates before committing, customers order
+   from a specific shop with a delivery pin and cash on delivery, and the
+   admin runs monthly shop subscriptions (payments received manually —
+   cash/EasyPaisa/JazzCash — gate dispatch) beside daily charts. The seed
+   world moved home to Johi, Dadu District, Sindh (`docs/PHASE-7.md`).
 
 Each phase lands as a pull request describing what changed, how it was
 tested, and what to verify before merging.
