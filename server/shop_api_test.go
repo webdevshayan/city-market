@@ -13,6 +13,7 @@ import (
 
 	"github.com/webdevshayan/city-market/server/catalog"
 	"github.com/webdevshayan/city-market/server/orders"
+	"github.com/webdevshayan/city-market/server/ratelimit"
 	"github.com/webdevshayan/city-market/server/store"
 )
 
@@ -38,7 +39,9 @@ func shopFlowServer(t *testing.T) (*httptest.Server, string, string) {
 	places = st
 	orderSvc = orders.NewService(cat, places, st.DB()).WithStock(st).WithEligibility(st)
 
-	srv := httptest.NewServer(secureHeaders(newMux()))
+	srv := httptest.NewServer(secureHeaders(newMuxWith(
+		ratelimit.New(1000, 10000).Middleware,
+		ratelimit.New(1000, 10000).Middleware)))
 	t.Cleanup(srv.Close)
 
 	resp, m := postJSON(t, srv.URL+"/v1/auth/shop/register",

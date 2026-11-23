@@ -11,6 +11,7 @@ import (
 	// Registers the pure-Go sqlite driver for file::memory: DSNs.
 	_ "modernc.org/sqlite"
 
+	"github.com/webdevshayan/city-market/server/ratelimit"
 	"github.com/webdevshayan/city-market/server/store"
 )
 
@@ -32,7 +33,9 @@ func authServer(t *testing.T) *httptest.Server {
 	origDB := dbStore
 	t.Cleanup(func() { dbStore = origDB })
 	dbStore = st
-	srv := httptest.NewServer(secureHeaders(newMux()))
+	srv := httptest.NewServer(secureHeaders(newMuxWith(
+		ratelimit.New(1000, 10000).Middleware,
+		ratelimit.New(1000, 10000).Middleware)))
 	t.Cleanup(srv.Close)
 	return srv
 }
@@ -150,7 +153,9 @@ func TestAuthValidationAndNoDatabase(t *testing.T) {
 	origDB := dbStore
 	dbStore = nil
 	t.Cleanup(func() { dbStore = origDB })
-	srv := httptest.NewServer(secureHeaders(newMux()))
+	srv := httptest.NewServer(secureHeaders(newMuxWith(
+		ratelimit.New(1000, 10000).Middleware,
+		ratelimit.New(1000, 10000).Middleware)))
 	defer srv.Close()
 
 	resp, _ := postJSON(t, srv.URL+"/v1/auth/shop/register",
