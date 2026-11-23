@@ -104,6 +104,8 @@ type Order struct {
 	Lng              float64   `json:"lng"`
 	CreatedAt        time.Time `json:"created_at"`
 	AddressNote      string    `json:"address_note"`
+	EstRouteMeters   int64     `json:"est_route_m"`
+	ClaimedAt        time.Time `json:"claimed_at"`
 }
 
 // PlaceInput is the citizen's order request. ShopID is the citizen picking
@@ -331,6 +333,42 @@ func (s *Service) ForRider(riderID string) ([]Order, error) {
 	return s.loadMany(`SELECT `+orderCols+orderFrom+` WHERE o.rider_id = ? ORDER BY o.created_at DESC`, riderID)
 }
 
+// AvailableOrders lists the dispatch board's jobs: confirmed orders no
+// rider has claimed yet, oldest first (the hungriest customer is served
+// first when a rider scans the board).
+func (s *Service) AvailableOrders() ([]Order, error) {
+	return s.loadMany(`SELECT `+orderCols+orderFrom+`
+		WHERE o.status = ? AND o.rider_id = '' ORDER BY o.created_at ASC`, string(StatusConfirmed))
+}
+
+// Claim is the atomic rider selection: one winner, loser riders get a 409
+// rather than a shared order. The caller supplies the route length and the
+// payout it showed the rider on the board — the ledger entry locks to the
+// exact numbers the rider accepted.
+func (s *Service) Claim(id, riderID string, routeMeters, payoutMinor int64) (Order, error) {
+	res, err := s.db.Exec(
+		`UPDATE orders SET rider_id = ?, claimed_at = ?, est_route_m = ?, rider_payout_minor = ?
+		 WHERE id = ? AND status = ? AND rider_id = ''`,
+		riderID, time.Now().UTC().Format(time.RFC3339Nano), routeMeters, payoutMinor,
+		id, string(StatusConfirmed))
+	if err != nil {
+		return Order{}, fmt.Errorf("orders: claim: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n != 1 {
+		// Either the order does not exist, or another rider won the race.
+		o, err := s.ByID(id)
+		if err != nil {
+			return Order{}, ErrUnknownOrder
+		}
+		return Order{}, fmt.Errorf("%w: order already has a rider (%s)", ErrInvalidTransition, o.RiderID)
+	}
+	o, err := s.ByID(id)
+	if err != nil {
+		return Order{}, err
+	}
+	return o, nil
+}
+
 // Transition moves an order to the next legal status (optimistic update on
 // the observed status, so a stale concurrent advance fails instead of
 // skipping a step).
@@ -384,7 +422,7 @@ func (s *Service) insert(o Order) error {
 const (
 	orderCols = `o.id, o.status, o.shop_id, COALESCE(sh.name, o.shop_id), o.rider_id,
 		COALESCE(rd.name, o.rider_id), o.subtotal_minor, o.delivery_fee_minor, o.total_minor,
-		o.rider_payout_minor, o.lat, o.lng, o.created_at, o.address_note`
+		o.rider_payout_minor, o.lat, o.lng, o.created_at, o.address_note, o.est_route_m, o.claimed_at`
 	// Names come from the live shops/riders tables so admin renames are
 	// reflected without rewriting orders.
 	orderFrom = ` FROM orders o
@@ -394,10 +432,10 @@ const (
 
 func scanOrder(row interface{ Scan(...any) error }) (Order, error) {
 	var o Order
-	var status, createdAt string
+	var status, createdAt, claimedAt string
 	if err := row.Scan(&o.ID, &status, &o.ShopID, &o.ShopName, &o.RiderID, &o.RiderName,
 		&o.SubtotalMinor, &o.DeliveryFeeMinor, &o.TotalMinor, &o.RiderPayoutMinor,
-		&o.Lat, &o.Lng, &createdAt, &o.AddressNote); err != nil {
+		&o.Lat, &o.Lng, &createdAt, &o.AddressNote, &o.EstRouteMeters, &claimedAt); err != nil {
 		return Order{}, err
 	}
 	o.Status = Status(status)
@@ -406,6 +444,13 @@ func scanOrder(row interface{ Scan(...any) error }) (Order, error) {
 		return Order{}, fmt.Errorf("orders: parse created_at: %w", err)
 	}
 	o.CreatedAt = t
+	if claimedAt != "" {
+		tc, err := time.Parse(time.RFC3339Nano, claimedAt)
+		if err != nil {
+			return Order{}, fmt.Errorf("orders: parse claimed_at: %w", err)
+		}
+		o.ClaimedAt = tc
+	}
 	return o, nil
 }
 

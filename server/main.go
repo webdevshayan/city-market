@@ -24,6 +24,7 @@ import (
 	"github.com/webdevshayan/city-market/server/match"
 	"github.com/webdevshayan/city-market/server/orders"
 	"github.com/webdevshayan/city-market/server/ratelimit"
+	"github.com/webdevshayan/city-market/server/route"
 	"github.com/webdevshayan/city-market/server/store"
 )
 
@@ -37,6 +38,10 @@ var (
 	places   placesSource     = seedPlaces{}
 	orderSvc *orders.Service  // nil until DATABASE_URL is wired — orders are durable by nature
 	dbStore  *store.Store
+
+	// routeEstimator answers road distance/time for the rider board; a
+	// flaky upstream degrades to the calibrated fallback inside it.
+	routeEstimator route.Estimator = route.New()
 )
 
 // placesSource supplies dispatch candidates to the matching API. *store.Store
@@ -173,10 +178,15 @@ func newMuxWith(apiLimit, cartLimit func(http.Handler) http.Handler) *http.Serve
 	mux.Handle("POST /v1/auth/logout", cartLimit(http.HandlerFunc(handleLogout)))
 	mux.Handle("POST /v1/orders", cartLimit(http.HandlerFunc(handlePlaceOrder)))
 	mux.Handle("GET /v1/orders/{id}", apiLimit(http.HandlerFunc(handleGetOrder)))
-	mux.Handle("GET /v1/rider/orders", apiLimit(http.HandlerFunc(handleRiderOrders)))
-	mux.Handle("POST /v1/shop/orders/{id}/confirm", cartLimit(http.HandlerFunc(handleOrderTransition(orders.StatusConfirmed))))
-	mux.Handle("POST /v1/rider/orders/{id}/pick-up", cartLimit(http.HandlerFunc(handleOrderTransition(orders.StatusPickedUp))))
-	mux.Handle("POST /v1/rider/orders/{id}/deliver", cartLimit(http.HandlerFunc(handleOrderTransition(orders.StatusDelivered))))
+	// Rider API — bearer-token gated; the board is the rider's decision
+	// surface and the claim is first-wins.
+	mux.Handle("GET /v1/rider/me", apiLimit(riderBearer(handleRiderMe)))
+	mux.Handle("POST /v1/rider/me", cartLimit(riderBearer(handleRiderSetMe)))
+	mux.Handle("GET /v1/rider/board", apiLimit(riderBearer(handleRiderBoard)))
+	mux.Handle("GET /v1/rider/orders", apiLimit(riderBearer(handleRiderJobs)))
+	mux.Handle("POST /v1/rider/orders/{id}/claim", cartLimit(riderBearer(handleRiderClaim)))
+	mux.Handle("POST /v1/rider/orders/{id}/pick-up", cartLimit(riderBearer(handleRiderTransition(orders.StatusPickedUp))))
+	mux.Handle("POST /v1/rider/orders/{id}/deliver", cartLimit(riderBearer(handleRiderTransition(orders.StatusDelivered))))
 	// Admin console: rate limit OUTSIDE auth so token guessing is throttled.
 	mux.Handle("GET /v1/admin/shops", apiLimit(adminAuth(http.HandlerFunc(handleAdminListShops))))
 	mux.Handle("GET /v1/admin/riders", apiLimit(adminAuth(http.HandlerFunc(handleAdminListRiders))))
@@ -210,7 +220,8 @@ func handleAPIIndex(w http.ResponseWriter, r *http.Request) {
 			"POST /v1/shop/products | PUT /v1/shop/products/{id} | POST /v1/shop/orders/{id}/{accept,cancel}",
 			"POST /v1/orders",
 			"GET /v1/orders/{id}",
-			"GET /v1/rider/orders?rider_id=… | POST /v1/rider/orders/{id}/pick-up | /deliver",
+			"GET /v1/rider/me | GET /v1/rider/board | GET /v1/rider/orders (Bearer rider)",
+			"POST /v1/rider/me | POST /v1/rider/orders/{id}/{claim,pick-up,deliver}",
 			"POST /v1/rider/orders/{id}/pick-up | /deliver",
 			"GET|PUT /v1/admin/{shops,riders,products,commission,stats} (X-Admin-Token)",
 		},
@@ -408,51 +419,6 @@ func handleGetOrder(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusNotFound, err.Error())
 	default:
 		writeErr(w, http.StatusInternalServerError, err.Error())
-	}
-}
-
-// handleRiderOrders lists a rider's assigned orders.
-func handleRiderOrders(w http.ResponseWriter, r *http.Request) {
-	listOrders(w, r, r.URL.Query().Get("rider_id"), "rider_id", orderSvc.ForRider)
-}
-
-func listOrders(w http.ResponseWriter, r *http.Request, id, param string, load func(string) ([]orders.Order, error)) {
-	if orderSvc == nil {
-		writeErr(w, http.StatusServiceUnavailable, "orders require Turso — set DATABASE_URL")
-		return
-	}
-	if id == "" {
-		writeErr(w, http.StatusBadRequest, "missing required query parameter: "+param)
-		return
-	}
-	list, err := load(id)
-	if err != nil {
-		writeErr(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	writeJSON(w, http.StatusOK, list)
-}
-
-// handleOrderTransition returns the handler for one status step; legality
-// and stale-state guards live in the orders engine, and a skipped step or a
-// repeat is a 409, never a silent state change.
-func handleOrderTransition(to orders.Status) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		if orderSvc == nil {
-			writeErr(w, http.StatusServiceUnavailable, "orders require Turso — set DATABASE_URL")
-			return
-		}
-		o, err := orderSvc.Transition(r.PathValue("id"), to)
-		switch {
-		case err == nil:
-			writeJSON(w, http.StatusOK, o)
-		case errors.Is(err, orders.ErrUnknownOrder):
-			writeErr(w, http.StatusNotFound, err.Error())
-		case errors.Is(err, orders.ErrInvalidTransition):
-			writeErr(w, http.StatusConflict, err.Error())
-		default:
-			writeErr(w, http.StatusInternalServerError, err.Error())
-		}
 	}
 }
 
