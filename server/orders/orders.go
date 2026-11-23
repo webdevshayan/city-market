@@ -106,6 +106,7 @@ type Order struct {
 	AddressNote      string    `json:"address_note"`
 	EstRouteMeters   int64     `json:"est_route_m"`
 	ClaimedAt        time.Time `json:"claimed_at"`
+	CitizenID        string    `json:"citizen_id"`
 }
 
 // PlaceInput is the citizen's order request. ShopID is the citizen picking
@@ -118,6 +119,7 @@ type PlaceInput struct {
 	Lng         float64
 	ShopID      string
 	AddressNote string
+	CitizenID   string // the ordering account; empty for a guest order
 }
 
 // Catalog is the slice of the catalog provider the service needs.
@@ -302,6 +304,7 @@ func (s *Service) Place(in PlaceInput) (Order, error) {
 		Lng:              in.Lng,
 		CreatedAt:        time.Now().UTC(),
 		AddressNote:      in.AddressNote,
+		CitizenID:        in.CitizenID,
 	}
 	if err := s.insert(o); err != nil {
 		return Order{}, fmt.Errorf("orders: persist: %w", err)
@@ -331,6 +334,13 @@ func (s *Service) ForShop(shopID string) ([]Order, error) {
 // ForRider lists a rider's assigned orders, newest first.
 func (s *Service) ForRider(riderID string) ([]Order, error) {
 	return s.loadMany(`SELECT `+orderCols+orderFrom+` WHERE o.rider_id = ? ORDER BY o.created_at DESC`, riderID)
+}
+
+// ForCitizen lists one account's order history, newest first — the
+// "My orders" screen. Guest orders (empty citizen_id) belong to nobody.
+func (s *Service) ForCitizen(citizenID string) ([]Order, error) {
+	return s.loadMany(`SELECT `+orderCols+orderFrom+`
+		WHERE o.citizen_id = ? ORDER BY o.created_at DESC`, citizenID)
 }
 
 // AvailableOrders lists the dispatch board's jobs: confirmed orders no
@@ -403,10 +413,10 @@ func (s *Service) insert(o Order) error {
 	defer tx.Rollback() // no-op after Commit
 	if _, err = tx.Exec(
 		`INSERT INTO orders (id, status, shop_id, rider_id, subtotal_minor, delivery_fee_minor,
-		 total_minor, rider_payout_minor, lat, lng, created_at, address_note)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		 total_minor, rider_payout_minor, lat, lng, created_at, address_note, citizen_id)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		o.ID, string(o.Status), o.ShopID, o.RiderID, o.SubtotalMinor, o.DeliveryFeeMinor,
-		o.TotalMinor, o.RiderPayoutMinor, o.Lat, o.Lng, o.CreatedAt.Format(time.RFC3339Nano), o.AddressNote); err != nil {
+		o.TotalMinor, o.RiderPayoutMinor, o.Lat, o.Lng, o.CreatedAt.Format(time.RFC3339Nano), o.AddressNote, o.CitizenID); err != nil {
 		return err
 	}
 	for _, it := range o.Items {
@@ -422,7 +432,7 @@ func (s *Service) insert(o Order) error {
 const (
 	orderCols = `o.id, o.status, o.shop_id, COALESCE(sh.name, o.shop_id), o.rider_id,
 		COALESCE(rd.name, o.rider_id), o.subtotal_minor, o.delivery_fee_minor, o.total_minor,
-		o.rider_payout_minor, o.lat, o.lng, o.created_at, o.address_note, o.est_route_m, o.claimed_at`
+		o.rider_payout_minor, o.lat, o.lng, o.created_at, o.address_note, o.est_route_m, o.claimed_at, o.citizen_id`
 	// Names come from the live shops/riders tables so admin renames are
 	// reflected without rewriting orders.
 	orderFrom = ` FROM orders o
@@ -435,7 +445,7 @@ func scanOrder(row interface{ Scan(...any) error }) (Order, error) {
 	var status, createdAt, claimedAt string
 	if err := row.Scan(&o.ID, &status, &o.ShopID, &o.ShopName, &o.RiderID, &o.RiderName,
 		&o.SubtotalMinor, &o.DeliveryFeeMinor, &o.TotalMinor, &o.RiderPayoutMinor,
-		&o.Lat, &o.Lng, &createdAt, &o.AddressNote, &o.EstRouteMeters, &claimedAt); err != nil {
+		&o.Lat, &o.Lng, &createdAt, &o.AddressNote, &o.EstRouteMeters, &claimedAt, &o.CitizenID); err != nil {
 		return Order{}, err
 	}
 	o.Status = Status(status)

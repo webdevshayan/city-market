@@ -34,6 +34,15 @@ type RiderAccount struct {
 	PasswordHash string
 }
 
+// CitizenAccount is a customer account. Citizens order as guests by
+// default — an account only attaches order history across devices.
+type CitizenAccount struct {
+	ID           string
+	Name         string
+	Phone        string
+	PasswordHash string
+}
+
 // ErrNotFound is returned by lookups that match no row.
 var ErrNotFound = sql.ErrNoRows
 
@@ -116,6 +125,40 @@ func (s *Store) scanShop(row *sql.Row) (ShopAccount, error) {
 	}
 	a.Active = active == 1
 	return a, nil
+}
+
+// CitizenByPhone loads a citizen by its login phone. Unique index on the
+// column backs the register-time check, so a race cannot double-register.
+func (s *Store) CitizenByPhone(phone string) (CitizenAccount, error) {
+	return s.scanCitizen(s.db.QueryRow(
+		`SELECT id, name, phone, password_hash FROM citizens WHERE phone = ?`, phone))
+}
+
+// CitizenByID loads one citizen account by ID.
+func (s *Store) CitizenByID(id string) (CitizenAccount, error) {
+	return s.scanCitizen(s.db.QueryRow(
+		`SELECT id, name, phone, password_hash FROM citizens WHERE id = ?`, id))
+}
+
+func (s *Store) scanCitizen(row *sql.Row) (CitizenAccount, error) {
+	var a CitizenAccount
+	err := row.Scan(&a.ID, &a.Name, &a.Phone, &a.PasswordHash)
+	if err != nil {
+		return CitizenAccount{}, err
+	}
+	return a, nil
+}
+
+// RegisterCitizen creates a customer account in one statement — the unique
+// phone index turns a concurrent duplicate into a constraint error.
+func (s *Store) RegisterCitizen(id, name, phone, passwordHash string) error {
+	_, err := s.db.Exec(
+		`INSERT INTO citizens (id, name, phone, password_hash) VALUES (?, ?, ?, ?)`,
+		id, name, phone, passwordHash)
+	if err != nil {
+		return fmt.Errorf("store: register citizen: %w", err)
+	}
+	return nil
 }
 
 // RiderByPhone loads a rider by its login phone.
