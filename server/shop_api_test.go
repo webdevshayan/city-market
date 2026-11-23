@@ -59,6 +59,11 @@ func shopFlowServer(t *testing.T) (*httptest.Server, string, string) {
 	if err := dbStore.SetShopPaid(shopID, "2099-12", "test seed"); err != nil {
 		t.Fatal(err)
 	}
+	// s-central holds the launch shelf (beef-1kg et al); pay it too so
+	// orders against seeded products have an eligible owner.
+	if err := dbStore.SetShopPaid("s-central", "2099-12", "test seed"); err != nil {
+		t.Fatal(err)
+	}
 	return srv, token, shopID
 }
 
