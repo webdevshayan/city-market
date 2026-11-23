@@ -193,7 +193,7 @@ class FakeApi implements ApiClient {
                   lng: 67.6133,
                   createdAt: DateTime.parse('2026-11-21T09:00:00Z'),
                   addressNote: 'Near the water tank'),
-            ],
+            ];
 
   final List<Product> products_;
   final Order placedOrder;
