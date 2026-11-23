@@ -21,7 +21,7 @@ apps/*/.packages
 
 # server/static/styles.css IS committed on purpose (single minified stylesheet, no CDN).
 
-# --- Local agent workspace (not part of the product repo) ---
+# --- Local workspace (not part of the product repo) ---
 download/
 upload/
 skills/

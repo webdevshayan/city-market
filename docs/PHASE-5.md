@@ -18,7 +18,7 @@ each app's pubspec `name:` (so Dart imports stayed intact), then hand-tuned:
 - **User-facing labels** — "City Market Citizen / Shop / Rider / Admin"
   instead of raw package names on the launcher.
 - **Gradle wrapper 8.3 → 8.5.** The template pins Gradle 8.3, which rejects
-  JDK 21 (the dev sandbox's Java); 8.5 accepts both JDK 17 (CI) and JDK 21
+  JDK 21 (the dev machine's Java); 8.5 accepts both JDK 17 (CI) and JDK 21
   (dev) without forking the template's AGP settings.
 - **applicationId** `dev.citymarket.<app>` — one namespace, stable across
   releases, so updates install in place over previous versions.
@@ -32,14 +32,13 @@ builds with it. The properties file is **never committed**:
 - CI assembles it from four Actions secrets: `ANDROID_KEYSTORE_B64` (the
   base64 PKCS12 keystore), `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`
   (citymarket), `ANDROID_KEY_PASSWORD`.
-- Without the secrets — the current state, because the working token has no
-  Actions-secrets permission — the workflow prints a loud `::warning::` and
+- Until the secrets are set, the workflow prints a loud `::warning::` and
   ships debug-signed APKs. Debug keys are ephemeral per CI run, so each
   debug-signed release requires uninstall-then-reinstall; releases become
   update-in-place the moment the secrets are set. No workflow change needed.
 - The release key itself was generated once with `keytool` (PKCS12, RSA 2048,
-  30-year validity, CN=City Market Release) and handed to the repo owner for
-  safekeeping; its certificate SHA-256 fingerprint is printed into every
+  30-year validity, CN=City Market Release) and is kept out of the
+  repository; its certificate SHA-256 fingerprint is printed into every
   release body so installs can be verified.
 
 ## Release workflow (`.github/workflows/release.yml`)
@@ -62,7 +61,7 @@ between runs (`~/.gradle`, keyed on the wrapper/build files). Failed runs
 leave gaps in the version sequence — a gap is simply a red run, never a
 half-published release.
 
-## Verified in this sandbox
+## Verified locally
 
 - `flutter create` scaffolds cleanly; manifests verified for INTERNET,
   labels and `applicationId`; gradle wiring asserted by script (3/3 checks
