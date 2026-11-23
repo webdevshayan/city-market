@@ -20,6 +20,7 @@ class FakeApi implements ApiClient {
     List<BoardJob>? board,
     List<ShopSubscription>? subscriptions,
     AuthResult? auth,
+    List<Order>? citizenOrders,
   })  : products_ = products ??
             [
               const Product(
@@ -171,7 +172,28 @@ class FakeApi implements ApiClient {
             ],
         auth_ = auth ??
             const AuthResult(
-                token: 'token-fixture', role: 'shop', shop: null, rider: null);
+                token: 'token-fixture', role: 'shop', shop: null, rider: null),
+        citizenOrders_ = citizenOrders ??
+            [
+              Order(
+                  id: 'ord-citizen-1',
+                  status: statusPlaced,
+                  shopId: 's-central',
+                  shopName: 'Madina Halal Store',
+                  riderId: '',
+                  riderName: '',
+                  items: const [
+                    OrderItem(productId: 'beef-1kg', qty: 1, unitPriceMinor: 140000),
+                  ],
+                  subtotalMinor: 140000,
+                  deliveryFeeMinor: 2500,
+                  totalMinor: 142500,
+                  riderPayoutMinor: 6000,
+                  lat: 26.692061,
+                  lng: 67.6133,
+                  createdAt: DateTime.parse('2026-11-21T09:00:00Z'),
+                  addressNote: 'Near the water tank'),
+            ],
 
   final List<Product> products_;
   final Order placedOrder;
@@ -185,11 +207,15 @@ class FakeApi implements ApiClient {
   final List<BoardJob> board_;
   final List<ShopSubscription> subscriptions_;
   final AuthResult auth_;
+  late List<Order> citizenOrders_;
 
   // Recorded calls the widget tests assert against.
   final placeOrderCalls = <List<OrderDraftItem>>[];
   final placeOrderNotes = <String>[];
   final placeOrderShopIds = <String?>[];
+  final placeOrderBearers = <String>[];
+  final citizenRegisterCalls = <Map<String, Object?>>[];
+  final loginCalls = <Map<String, Object?>>[];
   final confirmCalls = <String>[];
   final pickUpCalls = <String>[];
   final deliverCalls = <String>[];
@@ -230,17 +256,28 @@ class FakeApi implements ApiClient {
 
   @override
   Future<Order> placeOrder(List<OrderDraftItem> items, double lat, double lng,
-      {String? shopId, String addressNote = ''}) async {
+      {String? shopId, String addressNote = '', String bearer = ''}) async {
     placeOrderCalls.add(items);
     placeOrderNotes.add(addressNote);
     placeOrderShopIds.add(shopId);
+    placeOrderBearers.add(bearer);
     return placedOrder;
   }
+
+  @override
+  Future<List<Order>> citizenOrders(String token) async => citizenOrders_;
 
   @override
   Future<Order> order(String id) async => placedOrder;
 
   // ——— accounts ———
+
+  @override
+  Future<AuthResult> registerCitizen(
+      {required String name, required String phone, required String password}) async {
+    citizenRegisterCalls.add({'name': name, 'phone': phone, 'password': password});
+    return auth_;
+  }
 
   @override
   Future<AuthResult> registerShop(
@@ -253,7 +290,10 @@ class FakeApi implements ApiClient {
       auth_;
 
   @override
-  Future<AuthResult> login({required String role, required String phone, required String password}) async => auth_;
+  Future<AuthResult> login({required String role, required String phone, required String password}) async {
+    loginCalls.add({'role': role, 'phone': phone, 'password': password});
+    return auth_;
+  }
 
   @override
   Future<void> logout(String token) async {}
