@@ -5,7 +5,8 @@
 library;
 
 /// One catalog listing, as served by GET /v1/products — the public catalog
-/// the citizen app browses.
+/// the citizen app browses. Stock is the shop's live on-shelf quantity
+/// (decremented when the shop accepts an order).
 class Product {
   final String id;
   final String name;
@@ -15,6 +16,7 @@ class Product {
   final String image;
   final String shopId;
   final int priceMinor;
+  final int stock;
 
   const Product({
     required this.id,
@@ -25,6 +27,7 @@ class Product {
     required this.image,
     required this.shopId,
     required this.priceMinor,
+    this.stock = 0,
   });
 
   factory Product.fromJson(Map<String, dynamic> j) => Product(
@@ -36,10 +39,13 @@ class Product {
         image: j['image'] as String? ?? '',
         shopId: j['shop_id'] as String? ?? '',
         priceMinor: (j['price_minor'] as num).toInt(),
+        stock: (j['stock'] as num?)?.toInt() ?? 0,
       );
 
   /// Price rendered as "major.minor", matching the server's PriceText.
   String get priceText => money(priceMinor);
+
+  bool get inStock => stock > 0;
 }
 
 /// One order line, with the price snapshot taken at placement time.
@@ -83,6 +89,9 @@ class Order {
   final double lat;
   final double lng;
   final DateTime createdAt;
+  final String addressNote;
+  final int estRouteMeters;
+  final DateTime? claimedAt;
 
   const Order({
     required this.id,
@@ -99,6 +108,9 @@ class Order {
     required this.lat,
     required this.lng,
     required this.createdAt,
+    this.addressNote = '',
+    this.estRouteMeters = 0,
+    this.claimedAt,
   });
 
   factory Order.fromJson(Map<String, dynamic> j) => Order(
@@ -106,8 +118,8 @@ class Order {
         status: j['status'] as String,
         shopId: j['shop_id'] as String,
         shopName: j['shop_name'] as String? ?? j['shop_id'] as String,
-        riderId: j['rider_id'] as String,
-        riderName: j['rider_name'] as String? ?? j['rider_id'] as String,
+        riderId: j['rider_id'] as String? ?? '',
+        riderName: j['rider_name'] as String? ?? j['rider_id'] as String? ?? '',
         items: (j['items'] as List<dynamic>? ?? [])
             .map((e) => OrderItem.fromJson(e as Map<String, dynamic>))
             .toList(),
@@ -118,6 +130,198 @@ class Order {
         lat: (j['lat'] as num).toDouble(),
         lng: (j['lng'] as num).toDouble(),
         createdAt: DateTime.parse(j['created_at'] as String),
+        addressNote: j['address_note'] as String? ?? '',
+        estRouteMeters: (j['est_route_m'] as num?)?.toInt() ?? 0,
+        claimedAt: j['claimed_at'] is String && (j['claimed_at'] as String).isNotEmpty
+            ? DateTime.parse(j['claimed_at'] as String)
+            : null,
+      );
+}
+
+/// A shop owner's account, as served by registration, login and
+/// GET /v1/shop/me. Eligible means open AND paid through the running
+/// month — the admin marks the monthly payment manually.
+class ShopAccount {
+  final String id;
+  final String name;
+  final double lat;
+  final double lng;
+  final bool active;
+  final String phone;
+  final String paidThrough;
+  final String paymentNote;
+  final bool eligible;
+
+  const ShopAccount({
+    required this.id,
+    required this.name,
+    required this.lat,
+    required this.lng,
+    required this.active,
+    required this.phone,
+    required this.paidThrough,
+    required this.paymentNote,
+    required this.eligible,
+  });
+
+  factory ShopAccount.fromJson(Map<String, dynamic> j) => ShopAccount(
+        id: j['id'] as String,
+        name: j['name'] as String,
+        lat: (j['lat'] as num).toDouble(),
+        lng: (j['lng'] as num).toDouble(),
+        active: j['active'] as bool? ?? false,
+        phone: j['phone'] as String? ?? '',
+        paidThrough: j['paid_through'] as String? ?? '',
+        paymentNote: j['payment_note'] as String? ?? '',
+        eligible: j['eligible'] as bool? ?? false,
+      );
+}
+
+/// A rider's account.
+class RiderAccount {
+  final String id;
+  final String name;
+  final double lat;
+  final double lng;
+  final bool available;
+  final String phone;
+
+  const RiderAccount({
+    required this.id,
+    required this.name,
+    required this.lat,
+    required this.lng,
+    required this.available,
+    required this.phone,
+  });
+
+  factory RiderAccount.fromJson(Map<String, dynamic> j) => RiderAccount(
+        id: j['id'] as String,
+        name: j['name'] as String,
+        lat: (j['lat'] as num).toDouble(),
+        lng: (j['lng'] as num).toDouble(),
+        available: j['available'] as bool? ?? false,
+        phone: j['phone'] as String? ?? '',
+      );
+}
+
+/// One open job on the rider dispatch board — the full decision set the
+/// server computes before the rider commits: where to pick up, where to
+/// deliver, how far and how long, what it pays.
+class BoardJob {
+  final String orderId;
+  final String shopName;
+  final double shopLat;
+  final double shopLng;
+  final double dropLat;
+  final double dropLng;
+  final String addressNote;
+  final int lines;
+  final int totalMinor;
+  final double pickupKm;
+  final double routeKm;
+  final int etaMinutes;
+  final int payoutMinor;
+
+  const BoardJob({
+    required this.orderId,
+    required this.shopName,
+    required this.shopLat,
+    required this.shopLng,
+    required this.dropLat,
+    required this.dropLng,
+    required this.addressNote,
+    required this.lines,
+    required this.totalMinor,
+    required this.pickupKm,
+    required this.routeKm,
+    required this.etaMinutes,
+    required this.payoutMinor,
+  });
+
+  factory BoardJob.fromJson(Map<String, dynamic> j) => BoardJob(
+        orderId: j['order_id'] as String,
+        shopName: j['shop_name'] as String? ?? '',
+        shopLat: (j['shop_lat'] as num).toDouble(),
+        shopLng: (j['shop_lng'] as num).toDouble(),
+        dropLat: (j['drop_lat'] as num).toDouble(),
+        dropLng: (j['drop_lng'] as num).toDouble(),
+        addressNote: j['address_note'] as String? ?? '',
+        lines: (j['lines'] as num?)?.toInt() ?? 0,
+        totalMinor: (j['total_minor'] as num?)?.toInt() ?? 0,
+        pickupKm: (j['pickup_km'] as num?)?.toDouble() ?? 0,
+        routeKm: (j['route_km'] as num?)?.toDouble() ?? 0,
+        etaMinutes: (j['eta_minutes'] as num?)?.toInt() ?? 0,
+        payoutMinor: (j['payout_minor'] as num?)?.toInt() ?? 0,
+      );
+
+  String get payoutText => money(payoutMinor);
+}
+
+/// One row of the admin's subscription table: subscription state beside the
+/// current-month settlement the fixed Ujrah schedule computes.
+class ShopSubscription {
+  final String id;
+  final String name;
+  final bool active;
+  final String phone;
+  final String paidThrough;
+  final String paymentNote;
+  final bool eligible;
+  final int monthOrders;
+  final int monthSalesMinor;
+  final int ujrahMinor;
+  final int netMinor;
+
+  const ShopSubscription({
+    required this.id,
+    required this.name,
+    required this.active,
+    required this.phone,
+    required this.paidThrough,
+    required this.paymentNote,
+    required this.eligible,
+    required this.monthOrders,
+    required this.monthSalesMinor,
+    required this.ujrahMinor,
+    required this.netMinor,
+  });
+
+  factory ShopSubscription.fromJson(Map<String, dynamic> j) => ShopSubscription(
+        id: j['id'] as String,
+        name: j['name'] as String,
+        active: j['active'] as bool? ?? false,
+        phone: j['phone'] as String? ?? '',
+        paidThrough: j['paid_through'] as String? ?? '',
+        paymentNote: j['payment_note'] as String? ?? '',
+        eligible: j['eligible'] as bool? ?? false,
+        monthOrders: (j['month_orders'] as num?)?.toInt() ?? 0,
+        monthSalesMinor: (j['month_sales_minor'] as num?)?.toInt() ?? 0,
+        ujrahMinor: (j['ujrah_minor'] as num?)?.toInt() ?? 0,
+        netMinor: (j['net_minor'] as num?)?.toInt() ?? 0,
+      );
+}
+
+/// The 14-day daily series behind the admin charts (UTC buckets, oldest
+/// first, empty days included).
+class DailySeries {
+  final List<String> days;
+  final List<int> orders;
+  final List<int> gmvMinor;
+  final List<int> payoutMinor;
+
+  const DailySeries({
+    required this.days,
+    required this.orders,
+    required this.gmvMinor,
+    required this.payoutMinor,
+  });
+
+  factory DailySeries.fromJson(Map<String, dynamic> j) => DailySeries(
+        days: (j['days'] as List<dynamic>? ?? []).cast<String>(),
+        orders: (j['orders'] as List<dynamic>? ?? []).map((e) => (e as num).toInt()).toList(),
+        gmvMinor: (j['gmv_minor'] as List<dynamic>? ?? []).map((e) => (e as num).toInt()).toList(),
+        payoutMinor: (j['payout_minor'] as List<dynamic>? ?? []).map((e) => (e as num).toInt()).toList(),
       );
 }
 
@@ -249,6 +453,7 @@ class AdminStats {
   final int platformUjrahMinor;
   final List<ShopSettlement> shops;
   final List<RiderEarnings> riders;
+  final DailySeries series;
 
   const AdminStats({
     required this.shopsTotal,
@@ -265,6 +470,7 @@ class AdminStats {
     required this.platformUjrahMinor,
     required this.shops,
     required this.riders,
+    this.series = const DailySeries(days: [], orders: [], gmvMinor: [], payoutMinor: []),
   });
 
   factory AdminStats.fromJson(Map<String, dynamic> j) => AdminStats(
@@ -287,5 +493,8 @@ class AdminStats {
         riders: (j['riders'] as List<dynamic>? ?? [])
             .map((e) => RiderEarnings.fromJson(e as Map<String, dynamic>))
             .toList(),
+        series: j['series'] is Map<String, dynamic>
+            ? DailySeries.fromJson(j['series'] as Map<String, dynamic>)
+            : const DailySeries(days: [], orders: [], gmvMinor: [], payoutMinor: []),
       );
 }

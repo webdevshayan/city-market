@@ -11,9 +11,9 @@ Map<String, dynamic> orderFixture(String id, String status) => {
       'id': id,
       'status': status,
       'shop_id': 's-central',
-      'shop_name': 'Central Market Halal Store',
-      'rider_id': 'r-1',
-      'rider_name': 'Rider 1',
+      'shop_name': 'Madina Halal Store, Main Bazaar Johi',
+      'rider_id': '',
+      'rider_name': '',
       'items': [
         {'product_id': 'beef-1kg', 'qty': 2, 'unit_price_minor': 140000},
       ],
@@ -21,9 +21,10 @@ Map<String, dynamic> orderFixture(String id, String status) => {
       'delivery_fee_minor': 2500,
       'total_minor': 282500,
       'rider_payout_minor': 6000,
-      'lat': 24.8607,
-      'lng': 67.0011,
+      'lat': 26.692061,
+      'lng': 67.6133,
       'created_at': '2026-11-20T10:00:00Z',
+      'address_note': 'Near the grain market, blue shutter',
     };
 
 void main() {
@@ -34,44 +35,119 @@ void main() {
       return http.Response(jsonEncode(orderFixture('ord-1', statusPlaced)), 201);
     }));
 
-    final o = await api.placeOrder([OrderDraftItem('beef-1kg', 2)], 24.8607, 67.0011);
+    final o = await api.placeOrder([OrderDraftItem('beef-1kg', 2)], 26.692061, 67.6133,
+        shopId: 's-central', addressNote: 'Near the grain market');
 
     expect(captured!.method, 'POST');
     expect(captured!.url.path, '/v1/orders');
     final body = jsonDecode(captured!.body) as Map<String, dynamic>;
     expect(body['items'], hasLength(1));
     expect((body['items'] as List).first, containsPair('product_id', 'beef-1kg'));
-    expect(body['lat'], 24.8607);
+    expect(body['lat'], 26.692061);
+    expect(body['shop_id'], 's-central');
+    expect(body['address_note'], 'Near the grain market');
     expect(o.id, 'ord-1');
     expect(o.totalMinor, 282500);
+    expect(o.addressNote, 'Near the grain market, blue shutter');
   });
 
   test('server errors map to ApiException with the real message', () async {
     final api = HttpApiClient('https://api.example.test', client: MockClient((req) async {
       return http.Response(
-          jsonEncode({'error': 'no rider available right now'}), 409);
+          jsonEncode({'error': 'orders: not enough stock on the shelf'}), 409);
     }));
 
     await expectLater(
-      api.placeOrder([OrderDraftItem('beef-1kg', 1)], 24.8, 67.0),
+      api.placeOrder([OrderDraftItem('beef-1kg', 1)], 26.69, 67.61),
       throwsA(isA<ApiException>()
           .having((e) => e.statusCode, 'statusCode', 409)
-          .having((e) => e.message, 'message', 'no rider available right now')),
+          .having((e) => e.message, 'message', 'orders: not enough stock on the shelf')),
     );
   });
 
-  test('status transitions hit the right endpoints', () async {
+  test('marketplace steps hit the right bearer-gated endpoints', () async {
     final paths = <String>[];
+    final auths = <String?>[];
     final api = HttpApiClient('https://api.example.test', client: MockClient((req) async {
       paths.add(req.url.path);
+      auths.add(req.headers['Authorization']);
       return http.Response(jsonEncode(orderFixture('ord-1', 'x')), 200);
     }));
 
-    await api.confirmOrder('ord-1');
-    await api.pickUpOrder('ord-1');
-    await api.deliverOrder('ord-1');
+    await api.acceptOrder('shop-token', 'ord-1');
+    await api.claimOrder('rider-token', 'ord-1');
+    await api.pickUpOrder('rider-token', 'ord-1');
+    await api.deliverOrder('rider-token', 'ord-1');
 
-    expect(paths, ['/v1/shop/orders/ord-1/confirm', '/v1/rider/orders/ord-1/pick-up', '/v1/rider/orders/ord-1/deliver']);
+    expect(paths, [
+      '/v1/shop/orders/ord-1/accept',
+      '/v1/rider/orders/ord-1/claim',
+      '/v1/rider/orders/ord-1/pick-up',
+      '/v1/rider/orders/ord-1/deliver',
+    ]);
+    expect(auths[0], 'Bearer shop-token');
+    expect(auths[1], 'Bearer rider-token');
+  });
+
+  test('login posts the role and parses the account', () async {
+    http.Request? captured;
+    final api = HttpApiClient('https://api.example.test', client: MockClient((req) async {
+      captured = req;
+      return http.Response(
+          jsonEncode({
+            'token': 'tok-1',
+            'role': 'shop',
+            'shop': {
+              'id': 'sh-1',
+              'name': 'Test Shelf',
+              'lat': 26.6931,
+              'lng': 67.6156,
+              'active': true,
+              'phone': '923211234567',
+              'paid_through': '2026-11',
+              'payment_note': 'cash',
+              'eligible': true,
+            },
+          }),
+          200);
+    }));
+
+    final r = await api.login(role: 'shop', phone: '0300-1234567', password: 'long-enough');
+
+    expect(captured!.url.path, '/v1/auth/login');
+    expect(jsonDecode(captured!.body)['role'], 'shop');
+    expect(r.token, 'tok-1');
+    expect(r.shop!.eligible, isTrue);
+    expect(r.shop!.paidThrough, '2026-11');
+  });
+
+  test('the rider board parses every estimate field', () async {
+    final api = HttpApiClient('https://api.example.test', client: MockClient((req) async {
+      expect(req.url.path, '/v1/rider/board');
+      return http.Response(jsonEncode([
+        {
+          'order_id': 'ord-1',
+          'shop_name': 'Test Shelf',
+          'shop_lat': 26.6931,
+          'shop_lng': 67.6156,
+          'drop_lat': 26.7,
+          'drop_lng': 67.65,
+          'address_note': 'Near the grain market',
+          'lines': 2,
+          'total_minor': 142500,
+          'pickup_km': 0.9,
+          'route_km': 2.4,
+          'eta_minutes': 14,
+          'payout_minor': 96000,
+        }
+      ]), 200);
+    }));
+
+    final board = await api.riderBoard('rider-token');
+    expect(board.single.orderId, 'ord-1');
+    expect(board.single.etaMinutes, 14);
+    expect(board.single.routeKm, 2.4);
+    expect(board.single.payoutText, '960.00');
   });
 
   test('admin calls carry the token header', () async {
@@ -95,7 +171,7 @@ void main() {
     }));
 
     await api.adminUpsertShop('t',
-        id: 's-dha', name: 'DHA Store', lat: 24.825, lng: 67.07, active: true);
+        id: 's-dha', name: 'Dadu Road Mart', lat: 26.73, lng: 67.7769, active: true);
     await api.adminUpsertProduct('t',
         id: 'gajar-1kg',
         name: 'Gajar ka Halal Mix',
@@ -103,12 +179,44 @@ void main() {
         brand: 'noor',
         size: '1kg',
         priceMinor: 50000,
+        stock: 25,
         shopId: 's-dha');
 
     expect(requests[0].method, 'PUT');
     expect(requests[0].url.path, '/v1/admin/shops/s-dha');
-    expect(jsonDecode(requests[0].body)['name'], 'DHA Store');
+    expect(jsonDecode(requests[0].body)['name'], 'Dadu Road Mart');
     expect(requests[1].url.path, '/v1/admin/products/gajar-1kg');
-    expect(jsonDecode(requests[1].body)['price_minor'], 50000);
+    expect(jsonDecode(requests[1].body)['stock'], 25);
+  });
+
+  test('admin pay-shop PATCHes the subscription and the table parses', () async {
+    final requests = <http.Request>[];
+    final api = HttpApiClient('https://api.example.test', client: MockClient((req) async {
+      requests.add(req);
+      return http.Response(jsonEncode([
+        {
+          'id': 's-central',
+          'name': 'Madina Halal Store',
+          'active': true,
+          'phone': '923001234567',
+          'paid_through': '2026-11',
+          'payment_note': 'easypaisa trx 9912',
+          'eligible': true,
+          'month_orders': 12,
+          'month_sales_minor': 1680000,
+          'ujrah_minor': 117600,
+          'net_minor': 1562400,
+        }
+      ]), 200);
+    }));
+
+    await api.adminPayShop('t', id: 's-central', paidThrough: '2026-11', paymentNote: 'easypaisa trx 9912');
+    final rows = await api.adminSubscriptions('t');
+
+    expect(requests[0].method, 'PATCH');
+    expect(requests[0].url.path, '/v1/admin/shops/s-central/paid');
+    expect(jsonDecode(requests[0].body)['paid_through'], '2026-11');
+    expect(rows.single.eligible, isTrue);
+    expect(rows.single.ujrahMinor, 117600);
   });
 }
