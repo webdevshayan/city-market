@@ -189,6 +189,7 @@ class FakeApi implements ApiClient {
   // Recorded calls the widget tests assert against.
   final placeOrderCalls = <List<OrderDraftItem>>[];
   final placeOrderNotes = <String>[];
+  final placeOrderShopIds = <String?>[];
   final confirmCalls = <String>[];
   final pickUpCalls = <String>[];
   final deliverCalls = <String>[];
@@ -232,6 +233,7 @@ class FakeApi implements ApiClient {
       {String? shopId, String addressNote = ''}) async {
     placeOrderCalls.add(items);
     placeOrderNotes.add(addressNote);
+    placeOrderShopIds.add(shopId);
     return placedOrder;
   }
 
