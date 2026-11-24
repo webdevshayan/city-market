@@ -20,7 +20,6 @@ void silenceTileFetchErrors() {
       defaultOnError(details);
     }
   };
-  addTearDown(() => FlutterError.onError = defaultOnError);
 }
 
 class FakeApi implements ApiClient {
