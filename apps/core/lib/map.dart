@@ -44,7 +44,6 @@ TileLayer _tiles({required bool satellite}) => TileLayer(
       urlTemplate: satellite ? _satelliteTiles : _streetTiles,
       userAgentPackageName: 'dev.citymarket',
       maxNativeZoom: 19,
-      errorTileBuilder: (_, __, ___) => const ColoredBox(color: CMColors.wash),
     );
 
 /// The on-map attribution strip — OSM and Esri both require visible credit,
