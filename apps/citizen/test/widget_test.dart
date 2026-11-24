@@ -9,6 +9,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 Widget host(FakeApi api) => MaterialApp(home: SessionGate(api: api));
 
 Future<FakeApi> pumpGuest(WidgetTester tester) async {
+  silenceTileFetchErrors(); // installed in the body — setUp's handler is clobbered by the binding
   SharedPreferences.setMockInitialValues({});
   final api = FakeApi();
   await tester.pumpWidget(host(api));
@@ -99,6 +100,7 @@ void main() {
 
   testWidgets('a signed-in checkout attaches the account token', (tester) async {
     SharedPreferences.setMockInitialValues({});
+    silenceTileFetchErrors();
     final api = FakeApi();
     await tester.pumpWidget(host(api));
     await tester.pumpAndSettle();
@@ -209,6 +211,7 @@ void main() {
 
   testWidgets('ApiException surfaces as a real message, not a crash', (tester) async {
     SharedPreferences.setMockInitialValues({});
+    silenceTileFetchErrors();
     final api = _FailingApi();
     await tester.pumpWidget(host(api));
     await tester.pumpAndSettle();
