@@ -1,9 +1,24 @@
 import 'package:core/design.dart';
 import 'package:core/map.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' show ClientException;
 import 'package:latlong2/latlong.dart';
+
+/// Tile fetches fail under the test HTTP fake (status 400) and every tile
+/// load reports one ClientException through the image service. Swallow
+/// exactly those; anything else fails the test normally.
+void silenceTileFetchErrors() {
+  final FlutterExceptionHandler defaultOnError = FlutterError.onError!;
+  FlutterError.onError = (details) {
+    if (details.exception is! ClientException) {
+      defaultOnError(details);
+    }
+  };
+  addTearDown(() => FlutterError.onError = defaultOnError);
+}
 
 void main() {
   const route = CMRoute(
@@ -19,6 +34,7 @@ void main() {
       );
 
   testWidgets('job map: markers, on-map attribution and the layer toggle', (tester) async {
+    silenceTileFetchErrors();
     await tester.pumpWidget(host(CMJobMap(route: route)));
     await tester.pump();
 
@@ -42,6 +58,7 @@ void main() {
   });
 
   testWidgets('mini map: fits the route and keeps attribution on the map', (tester) async {
+    silenceTileFetchErrors();
     await tester.pumpWidget(host(CMMiniMap(route: route)));
     await tester.pump();
 
