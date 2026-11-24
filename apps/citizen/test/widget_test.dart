@@ -31,6 +31,8 @@ Future<void> signIn(WidgetTester tester, FakeApi api, {bool register = false}) a
 }
 
 void main() {
+  setUp(silenceTileFetchErrors);
+
   testWidgets('a guest browses, checks out and orders without any account', (tester) async {
     final api = await pumpGuest(tester);
 
