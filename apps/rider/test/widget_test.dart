@@ -10,10 +10,10 @@ Widget host(FakeApi api) => MaterialApp(home: SessionGate(api: api));
 void main() {
   setUp(() {
     SharedPreferences.setMockInitialValues({});
-    silenceTileFetchErrors();
   });
 
   testWidgets('sign-in lands on the board with duty controls', (tester) async {
+    silenceTileFetchErrors(); // in the body: the binding clobbers setUp handlers
     final api = FakeApi();
     await tester.pumpWidget(host(api));
     await tester.pumpAndSettle();
@@ -33,6 +33,7 @@ void main() {
   });
 
   testWidgets('the duty toggle calls the API both ways', (tester) async {
+    silenceTileFetchErrors(); // in the body: the binding clobbers setUp handlers
     final api = FakeApi();
     await tester.pumpWidget(host(api));
     await tester.pumpAndSettle();
@@ -51,6 +52,7 @@ void main() {
   });
 
   testWidgets('claiming a job moves it into My claimed jobs', (tester) async {
+    silenceTileFetchErrors(); // in the body: the binding clobbers setUp handlers
     final api = FakeApi();
     await tester.pumpWidget(host(api));
     await tester.pumpAndSettle();
@@ -76,6 +78,7 @@ void main() {
   });
 
   testWidgets('claimed jobs walk pick-up then deliver', (tester) async {
+    silenceTileFetchErrors(); // in the body: the binding clobbers setUp handlers
     final api = FakeApi();
     // The canned claimed job has already been accepted by the shop and
     // claimed — the state the pick-up button expects.
