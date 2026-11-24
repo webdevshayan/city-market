@@ -5,6 +5,23 @@ library;
 
 import 'package:core/api.dart';
 import 'package:core/models.dart';
+import 'package:flutter/foundation.dart';
+import 'package:http/http.dart' show ClientException;
+
+/// Silences exactly the tile-fetch errors a map widget produces under the
+/// test HTTP fake: every tile request returns 400, and each failure reports
+/// a ClientException through the image resource service — an expected,
+/// by-design artifact of rendering a map without network. Any other error
+/// still fails the test normally. Call it in the suite's [setUp].
+void silenceTileFetchErrors() {
+  final FlutterExceptionHandler defaultOnError = FlutterError.onError!;
+  FlutterError.onError = (details) {
+    if (details.exception is! ClientException) {
+      defaultOnError(details);
+    }
+  };
+  addTearDown(() => FlutterError.onError = defaultOnError);
+}
 
 class FakeApi implements ApiClient {
   FakeApi({

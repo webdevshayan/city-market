@@ -10,6 +10,7 @@ Widget host(FakeApi api) => MaterialApp(home: SessionGate(api: api));
 void main() {
   setUp(() {
     SharedPreferences.setMockInitialValues({});
+    silenceTileFetchErrors();
   });
 
   testWidgets('sign-in lands on the board with duty controls', (tester) async {
